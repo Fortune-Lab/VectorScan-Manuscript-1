@@ -9,8 +9,8 @@ Please don't hesitate to contact us if there are any issues.
 ### "Library_1_2.ipynb"
 Jupyter notebook containing the code that was used to generate the peptides in the VectorScan library
 
-### "VectorScan
-Library characterization.Rmd": R notebook containing code to analyze the input library
+### "VectorScanLibrary characterization.Rmd"
+R notebook containing code to analyze the input library
 
 ### "VectorScan - CDC - Plate 22.Rmd"
 R notebook containing code to analyze the CDC Puerto Rico human samples
