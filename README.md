@@ -6,9 +6,6 @@ All code relevant to producing the figures/conducting the analyses in the manusc
 
 Please don't hesitate to contact us if there are any issues.
 
-### "Library_1_2.ipynb"
-Jupyter notebook containing the code that was used to generate the peptides in the VectorScan library
-
 ### "VectorScanLibrary characterization.Rmd"
 R notebook containing code to analyze the input library
 
