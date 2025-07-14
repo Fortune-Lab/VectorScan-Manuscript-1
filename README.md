@@ -6,9 +6,20 @@ All code relevant to producing the figures/conducting the analyses in the manusc
 
 Please don't hesitate to contact us if there are any issues.
 
-"Library_1_2.ipynb": Jupyter notebook containing the code that was used to generate the peptides in the VectorScan library
-"VectorScan - Library characterization.Rmd": R notebook containing code to analyze the input library
-"VectorScan - CDC - Plate 22.Rmd": R notebook containing code to analyze the CDC Puerto Rico human samples
-"VectorScan - NHP - Plate 13.Rmd": R notebook containing code to analyze the DENV-exposed non-human primate (NHP) samples
-"VectorScan - NIH - Plates 14 and 15.Rmd": R notebook containing code to analyze the NIH controlled exposure human samples
-"VectorScan - Protein Annotation.Rmd": R notebook containing code to annotate the mosquito-derived proteins in the library with InterPro IDs and other annotations
+### "Library_1_2.ipynb"
+Jupyter notebook containing the code that was used to generate the peptides in the VectorScan library
+
+### "VectorScan
+Library characterization.Rmd": R notebook containing code to analyze the input library
+
+### "VectorScan - CDC - Plate 22.Rmd"
+R notebook containing code to analyze the CDC Puerto Rico human samples
+
+### "VectorScan - NHP - Plate 13.Rmd"
+R notebook containing code to analyze the DENV-exposed non-human primate (NHP) samples
+
+### "VectorScan - NIH - Plates 14 and 15.Rmd"
+R notebook containing code to analyze the NIH controlled exposure human samples
+
+### "VectorScan - Protein Annotation.Rmd"
+R notebook containing code to annotate the mosquito-derived proteins in the library with InterPro IDs and other annotations
