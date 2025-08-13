@@ -10,7 +10,7 @@ Please don't hesitate to contact us if there are any issues.
 R notebook containing code to analyze the input library
 
 ### "VectorScan - CDC - Plate 22.Rmd"
-R notebook containing code to analyze the CDC Puerto Rico human samples
+R notebook containing code to analyze the CDC human samples
 
 ### "VectorScan - NHP - Plate 13.Rmd"
 R notebook containing code to analyze the DENV-exposed non-human primate (NHP) samples
