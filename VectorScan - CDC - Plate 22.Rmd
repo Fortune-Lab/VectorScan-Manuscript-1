@@ -1,0 +1,1362 @@
+VectorScan Plate 22 
+
+```{r}
+# Load relevant libraries 
+library(Biostrings)
+library('dplyr')
+library('corrplot')
+library('writexl')
+library('readxl')
+library('seqinr')
+library(ggplot2)
+library(gridExtra)
+library(ggfortify)
+library(pheatmap)
+library(Biostrings)
+library(tidyverse)
+library(igraph)
+library(RColorBrewer)
+library(reshape2)
+library(qvalue)
+```
+
+```{r}
+setwd('set file path appropriately')
+VectorScan <- read_xlsx("VectorScan_Library_1_2.xlsx") ## Or file name of the relevant file that contains the library information
+
+VectorScan_GSLinkerNoise <- VectorScan[grep("GGSGGGSGGGSGGGSG", VectorScan$'AA Sequence'), ]
+VectorScan_cleaned <- anti_join(VectorScan, VectorScan_GSLinkerNoise, by = 'id')
+```
+
+## PLATE 22
+
+Read 1 Trim: CAGGTGTGATGCTCGGGGATCCAGGAATTCGGAGCGGT Read 2 Trim:
+GCTTATCGTCGTCATCCTTGTAATCGCGGCCGCAAGCTTGTCGAGTGCAGTG
+
+cd 'file path to fastq files'
+
+Cut off the first part so that only the actual peptide part is there:
+for fq in *R1_001.fastq.gz; do cutadapt -g
+CAGGTGTGATGCTCGGGGATCCAGGAATTCGGAGCGGT -o \${fq%%.*}.cut.fastq.gz \$fq;
+done for fq in *R2_001.fastq.gz; do cutadapt -g
+GCTTATCGTCGTCATCCTTGTAATCGCGGCCGCAAGCTTGTCGAGTGCAGTG -o
+\${fq%%.*}.cut.fastq.gz \$fq; done
+
+```{r}
+setwd('file path to where the fastqs are')
+
+Bowtie_fasta <- data.frame(id = VectorScan$id, Seq = VectorScan$'DNA Sequence')
+
+# Create an AAStringSet object
+seqs <- AAStringSet(Bowtie_fasta$Seq)
+  # Add names from the sequence header column
+names(seqs) <- paste0(Bowtie_fasta$id)
+writeXStringSet(seqs, filepath ="VectorScan_Bowtie.fasta")
+```
+
+Make the bowtie2 index: bowtie2-build -f VectorScan_Bowtie.fasta
+VectorScan_Bowtie
+
+#!/bin/bash
+
+# Define a function that processes a pair of FASTQ files
+
+align_paired_reads() { base=${1%_R1_001.cut.fastq.gz}
+  fq1="${base}\_R1_001.cut.fastq.gz" fq2="${base}_R2_001.cut.fastq.gz"
+  # Run Bowtie2 and redirect standard output and error
+  bowtie2 -x VectorScan_Bowtie --very-sensitive -1 "$fq1" -2
+"$fq2" -S "${base}.sam" 2\>&1 \| tee "\${base}\_bowtie2.log" }
+
+# Export the function to be used by parallel
+
+export -f align_paired_reads
+
+# Find all R1 files and pass them to GNU Parallel
+
+parallel align_paired_reads ::: \*\_R1_001.cut.fastq.gz
+
+chmod +x align_reads.sh ./align_reads.sh
+
+Turn into count files for i in *.sam; do samtools view -bS \$i \>
+\${i%.*}.bam; done for i in *.bam; do samtools sort \$i -o
+\${i%.*}.sorted.bam; done for i in *.sorted.bam; do samtools index \$i;
+done for i in* .sorted.bam; do samtools idxstats
+$i | cut -f 1,3 | gsed -e'/^\*\t/d' -e'1 i id\t'${i%%.*}\| tr "\\t" ","
+\> \${i%%.*}.count.csv; done
+
+Combine all the count files together paste -d ',' \*.count.csv \>
+2025_04_14_VectorScan_Plate22_counts.csv
+
+```{r}
+# Read in the counts file. Each column is a replicate, each row is a peptide in the library.
+
+Plate22_VectorScan_counts <- read.csv("2025_04_14_VectorScan_Plate22_counts.csv")
+cols_to_remove <- grepl("id", names(Plate22_VectorScan_counts))
+Plate22_VectorScan_counts_cleaned <- Plate22_VectorScan_counts[, !cols_to_remove]
+```
+
+```{r}
+Plate22_RPK <- Plate22_VectorScan_counts_cleaned
+Plate22_RPK <- sweep(Plate22_RPK, 2, colSums(Plate22_RPK), FUN = "/") * 1e5
+
+cols_with_word <- grep("PBS", names(Plate22_RPK), value = TRUE)
+Plate22_PBS <- Plate22_RPK[, cols_with_word]
+Plate22_PBS$median <- apply(Plate22_PBS, 1, median)
+
+Plate22_FC_byPBSmedian <- (Plate22_RPK+1) / (Plate22_PBS$median+1)
+
+cor_matrix <- cor(Plate22_FC_byPBSmedian,Plate22_FC_byPBSmedian, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+```{r}
+cols_to_remove <- grepl("TUNE.49", colnames(Plate22_FC_byPBSmedian))
+Plate22_FC_byPBSmedian_cleaned <- Plate22_FC_byPBSmedian[,!cols_to_remove]
+
+cor_matrix <- cor(Plate22_FC_byPBSmedian_cleaned,Plate22_FC_byPBSmedian_cleaned, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+```{r}
+temp <- Plate22_FC_byPBSmedian_cleaned
+
+colnames(temp) <- c('PBS.A01','PBS.A06','PBS.C03','PBS.C08','PBS.E05','PBS.F11','PBS.G07','PBS.H08','TUNE.24.A02','TUNE.24.F05','TUNE.25.A08','TUNE.25.F02','TUNE.26.A05','TUNE.26.C11','TUNE.27.A10','TUNE.27.C06','TUNE.28.C01','TUNE.28.H10','TUNE.29.B03','TUNE.29.E07','TUNE.30.B09','TUNE.30.H04','TUNE.31.D02','TUNE.31.D12','TUNE.32.A04','TUNE.32.E09','TUNE.33.A12','TUNE.33.D05','TUNE.34.B12','TUNE.34.E04','TUNE.35.B10','TUNE.35.F08','TUNE.36.C02','TUNE.36.E03','TUNE.37.A09','TUNE.37.H06','TUNE.38.B04','TUNE.38.F12','TUNE.39.B11','TUNE.39.D06','TUNE.40.A07','TUNE.40.F10','TUNE.41.D01','TUNE.41.H12','TUNE.42.B05','TUNE.42.G10','TUNE.43.C09','TUNE.43.F04','TUNE.44.D08','TUNE.44.G11','TUNE.45.A11','TUNE.45.G09','TUNE.46.B01','TUNE.46.E12','TUNE.47.D10','TUNE.47.G02','TUNE.48.C12','TUNE.48.E01','TUNE.50.D11','TUNE.50.E02','TUNE.51.C05','TUNE.51.G03','TUNE.52.A03','TUNE.52.F09','TUNE.68.D03','TUNE.68.G06','TUNE.69.B08','TUNE.69.H02','TUNE.70.D07','TUNE.70.H11','TUNE.71.E11','TUNE.71.G01','TUNE.72.C10','TUNE.72.H05','TUNE.73.C04','TUNE.73.G08','TUNE.74.C07','TUNE.74.H03','TUNE.75.E08','TUNE.75.F03','TUNE.76.E06','TUNE.76.G04','TUNE.77.F01','TUNE.77.F07','TUNE.78.G05','TUNE.78.H07')
+
+cor_matrix <- cor(temp,temp, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+```{r}
+Plate22_FC <- Plate22_FC_byPBSmedian_cleaned
+cols_to_remove <- grepl("PBS", names(Plate22_FC))
+Plate22_FC <- Plate22_FC[, !cols_to_remove]
+
+identifiers <- unique(str_extract(names(Plate22_FC),  "TUNE\\.\\d+\\.\\w+"))
+
+colnames(Plate22_FC) <- identifiers
+```
+
+```{r}
+temp <- Plate22_FC
+
+col_prefix <- substr(colnames(temp), 1, 7)
+unique_prefixes <- unique(col_prefix)
+
+row_means_list <- list()
+
+for (prefix in unique_prefixes) {
+  matching_columns <- colnames(temp)[col_prefix == prefix]
+  row_means <- rowMeans(temp[, matching_columns], na.rm = TRUE)
+  row_means_list[[prefix]] <- row_means
+}
+
+Plate22_FC_averaged <- as.data.frame(row_means_list)
+```
+
+```{r}
+identifiers <- colnames(Plate22_FC_averaged)
+
+Plate22_VectorScan_All_results_list <- list()
+Plate22_VectorScan_AllSeroreactive_results_list <- list()
+Plate22_VectorScan_Random_results_list <- list()
+enriched_values <- c()
+Plate22_VectorScan_AllSeroreactive_Dengue_results_list <- list()
+
+for (identifier in identifiers) {
+  selected_columns <- grep(identifier, names(Plate22_FC), value = TRUE)
+  Pt <- Plate22_FC[, selected_columns]
+  Pt$id <- VectorScan$id
+
+  Pt$Average <- (Pt[,1] + Pt[,2])/2
+  
+  Pt <- inner_join(Pt, VectorScan_cleaned, by = 'id')
+  
+  temp <- Pt[as.logical(Pt$Species == 'random'),]
+  Plate22_VectorScan_Random_results_list[[identifier]] <- temp
+  
+  # To be seropositive, the average of the replicates needs to have a FC that is 2x greater than 90% of the random peptides 
+  Seroreactive_threshold <- quantile(temp$Average, 0.8) * 2
+
+  enriched_values <- c(enriched_values, Seroreactive_threshold)
+  
+  # Find all seroreactive peptides
+  Pt$Seroreactive <- ifelse((Pt[,1] > Seroreactive_threshold & Pt[,2] > Seroreactive_threshold), 1, 0)
+  
+  All_seroreactive <- Pt 
+  All_seroreactive$Seroreactive <- Pt$Average*Pt$Seroreactive
+  
+  Plate22_VectorScan_All_results_list[[identifier]] <- Pt
+  
+  Pt <- Pt[as.logical(Pt$Seroreactive == 1),]
+  
+  Plate22_VectorScan_AllSeroreactive_results_list[[identifier]] <- Pt
+  
+  Plate22_VectorScan_AllSeroreactive_Dengue_results_list[[identifier]]  <- Pt[as.logical(Pt$Species == "DV"),]
+}
+```
+
+```{r}
+combined_data <- do.call(rbind, lapply(names(Plate22_VectorScan_Random_results_list), function(i) {
+  df <- Plate22_VectorScan_Random_results_list[[i]]
+  df$id <- paste("Subject ", i, sep = "")
+  df <- df[, c("Average", "id")]
+  return(df)
+}))
+
+melted_data <- melt(combined_data, id.vars = "id", variable.name = "Day", value.name = "Value")
+
+quantiles <- melted_data %>%
+  group_by(id, Day) %>%
+  summarize(quintile_0_8 = quantile(Value, 0.8, na.rm = TRUE)) %>%
+  mutate(quintile_0_8_times_2 = quintile_0_8 * 2)  
+
+# Create interaction labels for matching
+quantiles$interaction_label <- with(quantiles, interaction(id, Day))
+
+ggplot(melted_data, aes(x = interaction(id, Day), y = Value)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(width = 0.2, alpha = 0.5) +  
+  scale_y_log10() +
+  geom_point(data = quantiles, aes(x = interaction_label, y = quintile_0_8), 
+             color = "red", size = 2, shape = 16) +
+  geom_point(data = quantiles, aes(x = interaction_label, y = quintile_0_8_times_2), 
+             color = "blue", size = 2, shape = 16) + 
+  labs(x = "Sample", y = "Fold change over Mock IPs (log10)", title = "Boxplot with Quantile Points for Each Sample") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), legend.position = "none")
+```
+```{r}
+n_samples <- length(Plate22_VectorScan_All_results_list)
+
+Plate22_VectorScan_AllSeroreactive_Binary <- data.frame(do.call(cbind, lapply(Plate22_VectorScan_All_results_list, function(df) {
+  df[, c("Seroreactive")]})))
+
+Plate22_VectorScan_AllSeroreactive_Binary$sum <- rowSums(Plate22_VectorScan_AllSeroreactive_Binary)
+
+Plate22_VectorScan_AllSeroreactive_Binary$Percent <-  Plate22_VectorScan_AllSeroreactive_Binary$sum/n_samples*100
+
+Plate22_VectorScan_AllSeroreactive_Binary$id <- VectorScan_cleaned$id
+
+Plate22_VectorScan_AllSeroreactive_Binary <- inner_join(Plate22_VectorScan_AllSeroreactive_Binary, VectorScan_cleaned, by = 'id')
+
+#View(table(Plate22_VectorScan_AllSeroreactive_Binary$sum))
+
+#View(data.frame(colSums(Plate22_VectorScan_AllSeroreactive_Binary[,1:n_samples])))
+
+Plate22_VectorScan_AllSeroreactive_Binary_Controls <- Plate22_VectorScan_AllSeroreactive_Binary[as.logical(Plate22_VectorScan_AllSeroreactive_Binary$Group == "Control"),]
+#View(data.frame(colSums(Plate22_VectorScan_AllSeroreactive_Binary_Controls[,1:n_samples])))
+
+Plate22_VectorScan_AllSeroreactive_Binary_Mosquito <- Plate22_VectorScan_AllSeroreactive_Binary[as.logical(Plate22_VectorScan_AllSeroreactive_Binary$Group == "Mosquito"),]
+#View(data.frame(colSums(Plate22_VectorScan_AllSeroreactive_Binary_Mosquito[,1:n_samples])))
+
+Plate22_VectorScan_AllSeroreactive_Binary_Arbovirus <- Plate22_VectorScan_AllSeroreactive_Binary[as.logical(Plate22_VectorScan_AllSeroreactive_Binary$Group == "Virus"),]
+#View(data.frame(colSums(Plate22_VectorScan_AllSeroreactive_Binary_Arbovirus[,1:n_samples])))
+
+Plate22_VectorScan_AllSeroreactive_Binary_Plasmodium <- Plate22_VectorScan_AllSeroreactive_Binary[as.logical(Plate22_VectorScan_AllSeroreactive_Binary$Group == "Plasmodium"),]
+#View(data.frame(colSums(Plate22_VectorScan_AllSeroreactive_Binary_Plasmodium[,1:n_samples])))
+
+Plate22_VectorScan_AllSeroreactive_Binary_Bacteria <- Plate22_VectorScan_AllSeroreactive_Binary[as.logical(Plate22_VectorScan_AllSeroreactive_Binary$Group == "Bacteria"),]
+#View(data.frame(colSums(Plate22_VectorScan_AllSeroreactive_Binary_Bacteria[,1:n_samples])))
+
+
+Plate22_VectorScan_AllSeroreactive_Binary_Dengue <- Plate22_VectorScan_AllSeroreactive_Binary[as.logical(Plate22_VectorScan_AllSeroreactive_Binary$Species == "DV"),]
+#View(data.frame(colSums(Plate22_VectorScan_AllSeroreactive_Binary_Controls[,1:n_samples])))
+```
+
+ARBOVIRUS ANALYSIS
+
+```{r}
+temp <- Plate22_FC_averaged
+temp$id <- VectorScan$id 
+temp <- inner_join(temp, VectorScan_cleaned, by = 'id')
+
+Plate22_VectorScan_AllSeroreactive_AvgFC <- Plate22_VectorScan_AllSeroreactive_Binary[,1:39] * temp[,1:39]
+
+Plate22_VectorScan_AllSeroreactive_AvgFC$sum <- Plate22_VectorScan_AllSeroreactive_Binary$sum
+  
+# Replace all 0s with 1s in the entire data frame
+#Plate22_VectorScan_AllSeroreactive_AvgFC[Plate22_VectorScan_AllSeroreactive_AvgFC == 0] <- 1
+
+Plate22_VectorScan_AllSeroreactive_AvgFC$id <- VectorScan_cleaned$id 
+
+Plate22_VectorScan_AllSeroreactive_AvgFC <- inner_join(Plate22_VectorScan_AllSeroreactive_AvgFC, VectorScan_cleaned, by = 'id')
+
+Plate22_VectorScan_AllSeroreactive_AvgFC_Arboviral <- Plate22_VectorScan_AllSeroreactive_AvgFC[as.logical(Plate22_VectorScan_AllSeroreactive_AvgFC$Group == "Virus"),]
+
+Plate22_VectorScan_AllSeroreactive_AvgFC_Arboviral$Avg <- rowMeans(Plate22_VectorScan_AllSeroreactive_AvgFC_Arboviral[,1:39])
+
+#Plate22_VectorScan_AllSeroreactive_AvgFC_Arboviral <- Plate22_VectorScan_AllSeroreactive_AvgFC_Arboviral[as.logical(Plate22_VectorScan_AllSeroreactive_AvgFC_Arboviral$Avg > 1 ),]
+
+temp_threshold <- 3
+temp <- Plate22_VectorScan_AllSeroreactive_AvgFC_Arboviral[as.logical(Plate22_VectorScan_AllSeroreactive_AvgFC_Arboviral$sum >= temp_threshold),]
+temp_Arbovirus <- temp[as.logical(temp$Group == "Virus"),]
+
+temp_Dengue <- temp[as.logical(temp$Species == "DV"),]
+```
+
+```{r}
+df_t <- t(temp_Arbovirus[, 1:39])
+
+df_t <- as.data.frame(df_t)
+
+# Generate new group variable: "Exposed" = Dengue_Chik + Dengue_only
+group <- factor(c(
+  rep("Exposed", 15+13),
+  rep("Negative", 11)
+))
+
+colnames(df_t) <- as.numeric(as.character(temp_Arbovirus$id))
+
+df_t$group <- group
+```
+
+```{r}
+# Perform t-test for each feature
+
+feature_pvals <- apply(df_t[, -ncol(df_t)], 2, function(x) {
+  t.test(x ~ group, data = df_t)$p.value
+})
+
+feature_pvals_df <- data.frame(
+  Feature = names(feature_pvals),
+  p.value = feature_pvals, 
+  p.adj.fdr = p.adjust(feature_pvals, method = "BH")
+)
+
+feature_pvals_df <- feature_pvals_df[order(feature_pvals_df$p.value), ]
+
+observed <- -log10(sort(feature_pvals_df$p.value))
+expected <- -log10(ppoints(length(feature_pvals_df$p.value))) 
+
+pvals_adj <- p.adjust(feature_pvals_df$p.value, method = "fdr")
+
+plot(expected, observed,
+     pch = 16, cex = 0.6,
+     xlab = "Expected -log10(p)",
+     ylab = "Observed -log10(p)",
+     main = "Q-Q Plot of Feature p-values")
+abline(0, 1, col = "red", lty = 2)
+
+temp <- feature_pvals_df %>%
+  arrange(p.adj.fdr) %>%
+  mutate(rank = row_number())
+
+ggplot(temp, aes(x = rank, y = (p.adj.fdr))) +
+  geom_line() +
+  #geom_hline(yintercept = 0., col = "red", linetype = "dashed") +
+  labs(title = "Adjusted p-values vs. Rank",
+       x = "Feature rank", y = "FDR-adjusted p-value")
+
+library(qvalue)
+qobj <- qvalue(feature_pvals_df$p.value)
+summary(qobj)
+
+feature_pvals_df$qvalue <- qobj$qvalues
+
+```
+```{r}
+feature_pvals_df <- feature_pvals_df[order(feature_pvals_df$p.value), ]
+
+log2fc <- sapply(df_t[, -ncol(df_t)], function(x)
+  log2(mean(x[group == "Exposed"]) + 0.1) - log2(mean(x[group == "Negative"]) + 0.1)
+)
+
+feature_pvals_df$log2fc <- log2fc[match(feature_pvals_df$Feature, names(log2fc))]
+
+p_threshold <- 0.1
+
+feature_pvals_df$Signif <- feature_pvals_df$p.value < p_threshold
+
+ggplot(feature_pvals_df, aes(x = log2fc, y = -log10(p.value), color = Signif)) +
+  geom_point(alpha = 0.5) +
+  scale_color_manual(values = c("gray", "red")) +
+  geom_vline(xintercept = c(-1,1), linetype = "dashed", color = "gray") +
+  geom_hline(yintercept = -log10(p_threshold), linetype = "dashed", color = "gray") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank()) +
+  labs(
+    x = "log2 Fold Change (Exposed vs. Negative)",
+    y = "-log10(p-value)",
+    title = "Volcano Plot: Exposed vs Negative"
+  )
+```
+
+```{r}
+top_features <- feature_pvals_df[as.logical(feature_pvals_df$p.value < 0.1),]
+colnames(top_features) <- c('id', 'pvalue', 'p.adj', 'qvalue', 'log2fc', 'Signif')
+top_features$id <- as.numeric(top_features$id)
+
+top_features <- inner_join(top_features, Plate22_VectorScan_AllSeroreactive_AvgFC_Arboviral, by = 'id')
+
+top_features <- top_features %>%
+  arrange(id) %>% arrange(Family)
+
+rownames(top_features) <- paste0(top_features$Family, "_", top_features$Species, "_", top_features$id)
+
+annotation_col <- data.frame(
+  Exposure = factor(c(rep("DENV IgG+, CHIKV IgG+", 15), rep("DENV IgG+, CHIKV IgG-", 13), rep("DENV IgG-, CHIKV IgG-", 11)))
+)
+
+heatmap_data <- as.matrix(top_features[,7:45])
+
+rownames(annotation_col) <- colnames(heatmap_data)
+
+annotation_row <- top_features %>%
+  dplyr::select(Family, Species)  
+
+rownames(annotation_row) <- top_features$id
+rownames(heatmap_data) <- as.character(top_features$id)
+
+annotation_colors <- list(
+  Family = c(
+    "Alphavirus" = "#A15345",
+    "Flavivirus"  = "#862110",
+    "Bunyavirus"       = "#EC837D"
+  ), 
+  Exposure = c(
+    "DENV IgG+, CHIKV IgG+" = "purple" ,
+    "DENV IgG+, CHIKV IgG-" = "blue",
+    "DENV IgG-, CHIKV IgG-" = "#BFBFBF"
+  ), 
+  Species = c(
+    "CV"   = "#EF8EF9",
+    "DV"   = "#DA0017",
+    "JCV"  = "#63D6DE",
+    "JEV"  = "#2C69A9",
+    "MV"   = "#E00E77",
+    "PV"   = "#40A33A",
+    "SLEV" = "#843692",
+    "WNV"  = "#FC6908",
+    "YFV"  = "#FFFF28",
+    "ZV"  = "#94431F"
+  )
+)
+
+# Make the "Negative" group come first in the heatmap
+desired_col_order <- rownames(annotation_col)[order(annotation_col$Exposure != "DENV IgG-, CHIKV IgG-")]
+
+heatmap_data <- heatmap_data[, desired_col_order]        
+annotation_col <- annotation_col[desired_col_order, , drop = FALSE]
+
+pheatmap(
+  log2(heatmap_data+1),  
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = FALSE,               
+  show_colnames = TRUE,               
+  annotation_row = annotation_row,  
+  annotation_col = annotation_col,         
+  annotation_colors = annotation_colors, 
+  clustering_method = "average",
+  fontsize_col = 6,                      
+   border_color = NA,      
+  main = "IgG+ (for Dengue or Chikungunya) vs IgG- (for both)")
+
+top_features_significant_Arbovirus <- top_features
+```
+
+```{r}
+top_features_Alphavirus <- top_features_significant_Arbovirus[as.logical(top_features_significant_Arbovirus$Family == "Alphavirus"),]
+
+seqs <- AAStringSet(top_features_Alphavirus$'AA Sequence')
+  # Add names from the sequence header column
+names(seqs) <- paste0(top_features_Alphavirus$id)
+
+writeXStringSet(seqs, filepath = "Plate22_top_features_Alphavirus.faa")
+```
+
+cd [[location of files]]
+makeblastdb -in Plate22_top_features_Alphavirus.faa -out db -dbtype prot
+
+blastp -query Plate22_top_features_Alphavirus.faa -db db -evalue 1 -max_hsps 1 -max_target_seqs 100000 -word_size 7 -outfmt 6 -out Plate22_top_features_Alphavirus.txt 
+
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' Plate22_top_features_Alphavirus.txt > Plate22_top_features_Alphavirus.csv
+
+```{r}
+setwd('location of files')
+Plate22_top_features_Alphavirus_BLAST <- read.csv('Plate22_top_features_Alphavirus.csv', header = FALSE)
+Plate22_top_features_Alphavirus_BLAST <- Plate22_top_features_Alphavirus_BLAST[as.logical(Plate22_top_features_Alphavirus_BLAST$V12 >= 40),]
+
+edge_list <- Plate22_top_features_Alphavirus_BLAST[, c("V1", "V2")]
+g <- graph_from_data_frame(d = edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
+
+clusters <- cluster_louvain(g)
+
+membership_vector <- membership(clusters)
+cluster_sizes <- table(membership_vector)
+membership_df <- data.frame(id = as.numeric(names(membership_vector)), 
+                            ClusterID = as.integer(membership_vector))
+
+Plate22_top_features_Alphavirus_BLAST_membership_df <- inner_join(membership_df, VectorScan_cleaned, by = 'id')
+
+
+cluster_threshold <- 1
+valid_clusters <- names(cluster_sizes[cluster_sizes >= cluster_threshold])
+
+vertices_to_keep <- which(membership_vector %in% valid_clusters)
+g_filtered <- induced_subgraph(g, vids = vertices_to_keep)
+
+
+filtered_membership_vector <- membership_vector[vertices_to_keep]
+
+
+num_filtered_clusters <- length(unique(filtered_membership_vector))
+palette_size <- max(12, num_filtered_clusters)  # Ensure enough colors
+
+vertex_labels <- sapply(filtered_membership_vector, function(cluster_id) {
+  if (cluster_sizes[cluster_id] >= cluster_threshold) {
+    return(as.character(cluster_id))
+  } else {
+    return(NA) 
+  }
+})
+
+g_simplified <- simplify(g_filtered,  remove.loops = TRUE)
+  
+vertex_ids <- V(g_simplified)$name
+
+species_lookup <- Plate22_top_features_Alphavirus_BLAST_membership_df %>%
+  mutate(id = as.character(id)) %>%
+  select(id, Species) %>%
+  distinct()
+
+vertex_species <- species_lookup$Species[match(vertex_ids, species_lookup$id)]
+
+unique_species <- unique(vertex_species)
+n_species <- length(unique_species)
+
+species_colors <- c('CV' = "#EE8DF9", 'MV' = '#E02677')
+names(species_colors) <- unique_species
+
+vertex_colors_species <- species_colors[vertex_species]
+
+morethan1_membership_df <- membership_df %>%
+  group_by(ClusterID) %>%           
+  filter(n() >= cluster_threshold) %>%                 
+  ungroup()      
+  
+morethan1_membership_df <- inner_join(morethan1_membership_df, VectorScan_cleaned, by = 'id')
+morethan1_membership_df$ForAlignment <- paste0(">",morethan1_membership_df$id," ", morethan1_membership_df$'AA Sequence')
+
+Plate22_top_features_Alphavirus_morethan1_membership_df <- morethan1_membership_df[order(morethan1_membership_df$ClusterID, decreasing = FALSE), ]
+
+consistent_layout <- layout_with_fr(g_simplified)
+
+plot(g_simplified,
+     vertex.color = vertex_colors_species,
+     vertex.size = 8,
+     vertex.label = NA,
+     edge.arrow.size = 0.5,
+     main = "Alphavirus-derived clusters colored by Species",
+     layout = consistent_layout)
+
+legend("topright", legend = names(species_colors),
+       col = species_colors, pch = 19, pt.cex = 1.2, bty = "n")
+
+```
+
+```{r}
+ChikE2 <- Plate22_top_features_Alphavirus_morethan1_membership_df[as.logical(Plate22_top_features_Alphavirus_morethan1_membership_df$ClusterID == "6"),]
+```
+
+```{r}
+top_features_Flavivirus <- top_features_significant_Arbovirus[as.logical(top_features_significant_Arbovirus$Family == "Flavivirus"),]
+
+setwd('location of files')
+
+seqs <- AAStringSet(top_features_Flavivirus$'AA Sequence')
+  # Add names from the sequence header column
+names(seqs) <- paste0(top_features_Flavivirus$id)
+
+writeXStringSet(seqs, filepath = "Plate22_top_features_Flavivirus.faa")
+```
+
+cd [[location of files]]
+makeblastdb -in Plate22_top_features_Flavivirus.faa -out db -dbtype prot
+
+blastp -query Plate22_top_features_Flavivirus.faa -db db -evalue 1 -max_hsps 1 -max_target_seqs 100000 -word_size 7 -outfmt 6 -out Plate22_top_features_Flavivirus.txt 
+
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' Plate22_top_features_Flavivirus.txt > Plate22_top_features_Flavivirus.csv
+
+```{r}
+setwd('location of files')
+Plate22_top_features_Flavivirus_BLAST <- read.csv('Plate22_top_features_Flavivirus.csv', header = FALSE)
+Plate22_top_features_Flavivirus_BLAST <- Plate22_top_features_Flavivirus_BLAST[as.logical(Plate22_top_features_Flavivirus_BLAST$V12 >= 40),]
+
+edge_list <- Plate22_top_features_Flavivirus_BLAST[, c("V1", "V2")]
+g <- graph_from_data_frame(d = edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
+
+clusters <- cluster_louvain(g)
+
+membership_vector <- membership(clusters)
+cluster_sizes <- table(membership_vector)
+membership_df <- data.frame(id = as.numeric(names(membership_vector)), 
+                            ClusterID = as.integer(membership_vector))
+
+Plate22_top_features_Flavivirus_BLAST_membership_df <- inner_join(membership_df, VectorScan_cleaned, by = 'id')
+
+cluster_threshold <- 1
+valid_clusters <- names(cluster_sizes[cluster_sizes >= cluster_threshold])
+
+vertices_to_keep <- which(membership_vector %in% valid_clusters)
+ g_filtered <- induced_subgraph(g, vids = vertices_to_keep)
+  
+filtered_membership_vector <- membership_vector[vertices_to_keep]
+
+num_filtered_clusters <- length(unique(filtered_membership_vector))
+palette_size <- max(12, num_filtered_clusters)  # Ensure enough colors
+
+vertex_labels <- sapply(filtered_membership_vector, function(cluster_id) {
+  if (cluster_sizes[cluster_id] >= cluster_threshold) {
+    return(as.character(cluster_id))
+  } else {
+    return(NA) 
+  }
+})
+
+g_simplified <- simplify(g_filtered,  remove.loops = TRUE)
+  
+vertex_ids <- V(g_simplified)$name
+
+species_lookup <- Plate22_top_features_Flavivirus_BLAST_membership_df %>%
+  mutate(id = as.character(id)) %>%
+  select(id, Species) %>%
+  distinct()
+
+vertex_species <- species_lookup$Species[match(vertex_ids, species_lookup$id)]
+
+unique_species <- unique(vertex_species)
+n_species <- length(unique_species)
+
+palette_name <- "Set1"  
+species_colors <- brewer.pal(min(n_species, 9), palette_name)
+names(species_colors) <- unique_species
+
+vertex_colors_species <- species_colors[vertex_species]
+
+vertex_colors_species <- species_colors[vertex_species]
+ 
+morethan1_membership_df <- membership_df %>%
+  group_by(ClusterID) %>%            
+  filter(n() >= cluster_threshold) %>%                
+  ungroup()      
+  
+morethan1_membership_df <- inner_join(morethan1_membership_df, VectorScan_cleaned, by = 'id')
+morethan1_membership_df$ForAlignment <- paste0(">",morethan1_membership_df$id," ", morethan1_membership_df$'AA Sequence')
+
+Plate22_top_features_Flavivirus_morethan1_membership_df <- morethan1_membership_df[order(morethan1_membership_df$ClusterID, decreasing = FALSE), ]
+
+consistent_layout <- layout_with_fr(g_simplified)
+
+plot(g_simplified,
+     vertex.color = vertex_colors_species,
+     vertex.size = 8,
+     vertex.label = NA,
+     edge.arrow.size = 0.5,
+     main = "Flavivirus-derived clusters colored by Species",
+     layout = consistent_layout)
+
+legend("topright", legend = names(species_colors),
+       col = species_colors, pch = 19, pt.cex = 1.2, bty = "n")
+
+vertex_labels <- sapply(filtered_membership_vector, function(cluster_id) {
+  if (cluster_sizes[cluster_id] >= cluster_threshold) {
+    return(as.character(cluster_id))
+  } else {
+    return(NA)
+  }
+})
+
+label_indices <- !duplicated(filtered_membership_vector)
+vertex_labels2 <- ifelse(label_indices, as.character(filtered_membership_vector), NA)
+
+plot(g_simplified,
+     vertex.color = vertex_colors_species,
+     vertex.size = 8,
+     vertex.label = vertex_labels2,    
+     vertex.label.cex = 0.8,        
+     vertex.label.color = "black",  
+     edge.arrow.size = 0.5,
+     main = "Clusters labeled by Cluster_ID",
+     layout = consistent_layout)
+
+legend("topright", legend = names(species_colors),
+       col = species_colors, pch = 19, pt.cex = 1.2, bty = "n")
+
+```
+```{r}
+Strain_Specific <- read_xlsx('Strain_specific.xlsx')
+```
+
+```{r}
+top_features_DENV <- top_features_Flavivirus[as.logical(top_features_Flavivirus$Species == "DV"),]
+top_features_DENV_serotypeSpecific <- inner_join(top_features_DENV, Strain_Specific, by = 'id')
+```
+
+```{r}
+temp <- top_features_DENV
+  
+temp <- inner_join(temp, DENV1_peptides, by = 'id') # DENV1_peptides is from the Plate 13 file
+
+temp$Source <- "CDC"
+
+# Create the density plot
+plot <- ggplot(temp, aes(x = AANumber, fill = Source)) +
+  geom_density(alpha = 0.5, adjust = 0.05) +  # Adjust the 'adjust' parameter as needed for smoothing
+  labs(title = "Density Plot of post-infection enriched peptides",
+       x = "AANumber",
+       y = "Density",
+       fill = "Source") +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, max(temp$AANumber, na.rm = TRUE), by = 100)) + # Set x-axis breaks every 50 units
+  scale_fill_manual(values = c("NHP1" = "#96362E", "NHP2" = "#CB713C", "NHP4" = "#A6C392", "CDC" = "#0000FF")) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 114, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 280, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 775, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1127, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1345, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1475, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2093, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2220, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2243, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2491, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 3391, linetype = "dashed", color = "black", size = 0.2) +
+  theme(legend.position = c(.85, .85), 
+        panel.grid = element_blank(),
+        panel.border = element_rect(color = 'black', fill = NA, size = .25),
+       # plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) # Rotate x-axis labels to be vertical
+
+print(plot)
+```
+
+
+```{r}
+df1 <- NHP1_EarlyandLateHits
+names(df1)[names(df1) == "NHP1_AANumber"] <- "AANumber"
+df2 <- NHP2_EarlyandLateHits
+names(df2)[names(df2) == "NHP2_AANumber"] <- "AANumber"
+df4 <- NHP4_EarlyandLateHits
+names(df4)[names(df4) == "NHP4_AANumber"] <- "AANumber"
+
+all_data <- bind_rows(
+  df1 %>% mutate(Source = "NHP1"),
+  df2 %>% mutate(Source = "NHP2"),
+  df4 %>% mutate(Source = "NHP4"),
+  temp %>% mutate(Source = "CDC")
+)
+
+combined_data$Source <- as.factor(combined_data$Source)
+
+plot <- ggplot(all_data, aes(x = AANumber, fill = Source)) +
+  geom_density(alpha = 0.4, adjust = 0.05) +
+  labs(
+    title = "Density Plot of post-infection enriched peptides",
+    x = "AANumber",
+    y = "Density",
+    fill = "Source"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, max(all_data$AANumber, na.rm = TRUE), by = 100)) +
+  scale_fill_manual(values = c("NHP1" = "#96362E", "NHP2" = "#CB713C", "NHP4" = "#A6C392", "CDC" = "#0000FF")) +
+  geom_vline(xintercept = c(0,114,280,775,1127,1345,1475,2093,2220,2243,2491,3391),
+             linetype = "dashed", color = "black", size = 0.2) +
+  theme(
+    legend.position = c(.85, .8),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = 'black', fill = NA, size = .25),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+
+print(plot)
+```
+
+MOSQUITO ANALYSIS
+
+```{r}
+Plate22_VectorScan_AllSeroreactive_AvgFC_Mosquito <- Plate22_VectorScan_AllSeroreactive_AvgFC[as.logical(Plate22_VectorScan_AllSeroreactive_AvgFC$Group == "Mosquito"),]
+
+temp_threshold <- 1
+temp <- Plate22_VectorScan_AllSeroreactive_AvgFC_Mosquito[as.logical(Plate22_VectorScan_AllSeroreactive_AvgFC_Mosquito$sum >= temp_threshold),]
+temp_Mosquito <- temp[as.logical(temp$Group == "Mosquito"),]
+
+df_t <- t(temp_Mosquito[, 1:39])
+df_t <- as.data.frame(df_t)
+
+# "Exposed" = Dengue_Chik + Dengue_only
+group <- factor(c(
+  rep("Exposed", 15 + 13),  
+  rep("Negative", 11)
+))
+
+colnames(df_t) <- as.numeric(as.character(temp_Mosquito$id))
+
+df_t$group <- group
+```
+
+```{r}
+# Perform t-test for each feature
+feature_pvals <- apply(df_t[, -ncol(df_t)], 2, function(x) {
+  t.test(x ~ group, data = df_t)$p.value
+})
+
+feature_pvals_df <- data.frame(
+  Feature = names(feature_pvals),
+  p.value = feature_pvals, 
+  p.adj.fdr = p.adjust(feature_pvals, method = "BH")
+)
+
+feature_pvals_df <- feature_pvals_df[order(feature_pvals_df$p.value), ]
+
+log2fc <- sapply(df_t[, -ncol(df_t)], function(x)
+  log2(mean(x[group == "Exposed"]) + 0.1) - log2(mean(x[group == "Negative"]) + 0.1)
+)
+
+feature_pvals_df$log2fc <- log2fc[match(feature_pvals_df$Feature, names(log2fc))]
+
+```
+
+```{r}
+p_threshold <- 0.1
+
+feature_pvals_df$Signif <- feature_pvals_df$p.value < p_threshold
+
+ggplot(feature_pvals_df, aes(x = log2fc, y = -log10(p.value), color = Signif)) +
+  geom_point(alpha = 0.5) +
+  scale_color_manual(values = c("gray", "red")) +
+  geom_vline(xintercept = c(-1,1), linetype = "dashed", color = "gray") +
+  geom_hline(yintercept = -log10(p_threshold), linetype = "dashed", color = "gray") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank()) +
+  labs(
+    x = "log2 Fold Change (Exposed vs. Negative)",
+    y = "-log10(p-value)",
+    title = "Volcano Plot: Exposed vs Negative"
+  )
+```
+
+```{r}
+top_features_PR_mosquito <- feature_pvals_df
+
+top_features_PR_mosquito <- feature_pvals_df[as.logical(feature_pvals_df$p.value < p_threshold),]
+colnames(top_features_PR_mosquito) <- c("id",   "p.value",   "p.adj.fdr", "log2fc",    "Signif"   )
+top_features_PR_mosquito$id <- as.numeric(top_features_PR_mosquito$id)
+
+top_features_PR_mosquito <- inner_join(top_features_PR_mosquito, Plate22_VectorScan_AllSeroreactive_AvgFC_Mosquito, by = 'id')
+
+top_features_PR_mosquito <- top_features_PR_mosquito %>%
+  arrange(id) %>% arrange(Family)
+
+rownames(top_features_PR_mosquito) <- paste0(top_features_PR_mosquito$Family, "_", top_features_PR_mosquito$Species, "_", top_features_PR_mosquito$id)
+
+annotation_col <- data.frame(
+  Exposure = factor(c(rep("DENV IgG+ and/or CHIKV IgG+", 28), rep("DENV IgG- and CHIKV IgG-", 11)))
+)
+
+heatmap_data <- as.matrix(top_features_PR_mosquito[,6:44])
+
+rownames(annotation_col) <- colnames(heatmap_data)
+
+annotation_row <- top_features_PR_mosquito %>%
+  dplyr::select(Family, Species) 
+
+rownames(annotation_row) <- top_features_PR_mosquito$id
+
+rownames(heatmap_data) <- as.character(top_features_PR_mosquito$id)
+
+annotation_colors <- list(
+  Family = c(
+    "Aedes" = "#1B2FDD",
+    "Anopheles"  = "#5588E4",
+    "Culex"       = "#21518A"
+  ), 
+  Exposure = c(
+    "DENV IgG+ and/or CHIKV IgG+" = "maroon" ,
+    "DENV IgG- and CHIKV IgG-" = "#BFBFBF"
+  )
+)
+
+desired_col_order <- rownames(annotation_col)[order(annotation_col$Exposure != "DENV IgG- and CHIKV IgG-")]
+
+heatmap_data <- heatmap_data[, desired_col_order]       
+annotation_col <- annotation_col[desired_col_order, , drop = FALSE] 
+
+pheatmap(
+  log2(heatmap_data+1), 
+  cluster_rows = TRUE,
+  cluster_cols = FALSE,
+  show_rownames = FALSE,               
+  show_colnames = FALSE,             
+  annotation_col = annotation_col,        
+  annotation_colors = annotation_colors, 
+  clustering_method = "ward.D2",
+  fontsize_col = 6,                      
+   border_color = NA,      
+  main = "IgG+ (for Dengue or Chikungunya) vs IgG- (for both)")
+
+top_features_PR_mosquito_significant_Mosquito <- top_features_PR_mosquito
+
+```
+
+```{r}
+table(top_features_PR_mosquito_significant_Mosquito$Family)/sum(table(top_features_PR_mosquito_significant_Mosquito$Family))*100
+
+group_to_test <- "Aedes"
+df <- top_features_PR_mosquito_significant_Mosquito
+#df <- Plates14and15_VectorScan_BoostedOnly_results_list[[patient]]
+#df3 <- df[as.logical(df$'Group' == group_to_test),]
+df3 <- df[as.logical(df$'Family' == group_to_test),]
+
+temp1 <- nrow(df3)
+#temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Group' == group_to_test),]) - nrow(df3)
+#temp2 <- nrow(VectorScan[as.logical(VectorScan$'Group' == group_to_test),]) - nrow(df3)
+temp2 <- nrow(temp_Mosquito[as.logical(temp_Mosquito$'Family' == group_to_test),]) - nrow(df3)
+temp3 <- nrow(df) - nrow(df3)
+temp4 <- nrow(temp_Mosquito) - temp1 - temp2 - temp3
+#temp4 <- nrow(VectorScan) - temp1 - temp2 - temp3
+  
+paste0("Num ", group_to_test, " Hits ", temp1)
+paste0("Num ", group_to_test, " Not hits ", temp2)
+paste0("Num Non-", group_to_test, " Hits ", temp3 )
+paste0("Num Non-", group_to_test, " Not hits ", temp4)
+
+# Create a contingency table
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+# Assign column and row names for clarity
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c(group_to_test, paste0("Not ", group_to_test))
+
+contingencies <- contingency_table
+  fisher_test <- fisher.test(contingency_table)
+  
+print(contingency_table)
+print(fisher_test)
+
+group_to_test <- "Anopheles"
+df <- top_features_PR_mosquito_significant_Mosquito
+#df <- Plates14and15_VectorScan_BoostedOnly_results_list[[patient]]
+#df3 <- df[as.logical(df$'Group' == group_to_test),]
+df3 <- df[as.logical(df$'Family' == group_to_test),]
+
+temp1 <- nrow(df3)
+#temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Group' == group_to_test),]) - nrow(df3)
+#temp2 <- nrow(VectorScan[as.logical(VectorScan$'Group' == group_to_test),]) - nrow(df3)
+temp2 <- nrow(temp_Mosquito[as.logical(temp_Mosquito$'Family' == group_to_test),]) - nrow(df3)
+temp3 <- nrow(df) - nrow(df3)
+temp4 <- nrow(temp_Mosquito) - temp1 - temp2 - temp3
+#temp4 <- nrow(VectorScan) - temp1 - temp2 - temp3
+  
+paste0("Num ", group_to_test, " Hits ", temp1)
+paste0("Num ", group_to_test, " Not hits ", temp2)
+paste0("Num Non-", group_to_test, " Hits ", temp3 )
+paste0("Num Non-", group_to_test, " Not hits ", temp4)
+
+# Create a contingency table
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+# Assign column and row names for clarity
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c(group_to_test, paste0("Not ", group_to_test))
+
+contingencies <- rbind(contingencies, contingency_table)
+  fisher_test <- fisher.test(contingency_table)
+  
+print(contingency_table)
+print(fisher_test)
+
+group_to_test <- "Culex"
+df <- top_features_PR_mosquito_significant_Mosquito
+#df <- Plates14and15_VectorScan_BoostedOnly_results_list[[patient]]
+#df3 <- df[as.logical(df$'Group' == group_to_test),]
+df3 <- df[as.logical(df$'Family' == group_to_test),]
+
+temp1 <- nrow(df3)
+#temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Group' == group_to_test),]) - nrow(df3)
+#temp2 <- nrow(VectorScan[as.logical(VectorScan$'Group' == group_to_test),]) - nrow(df3)
+temp2 <- nrow(temp_Mosquito[as.logical(temp_Mosquito$'Family' == group_to_test),]) - nrow(df3)
+temp3 <- nrow(df) - nrow(df3)
+temp4 <- nrow(temp_Mosquito) - temp1 - temp2 - temp3
+#temp4 <- nrow(VectorScan) - temp1 - temp2 - temp3
+  
+paste0("Num ", group_to_test, " Hits ", temp1)
+paste0("Num ", group_to_test, " Not hits ", temp2)
+paste0("Num Non-", group_to_test, " Hits ", temp3 )
+paste0("Num Non-", group_to_test, " Not hits ", temp4)
+
+# Create a contingency table
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+# Assign column and row names for clarity
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c(group_to_test, paste0("Not ", group_to_test))
+
+contingencies <- rbind(contingencies, contingency_table)
+  fisher_test <- fisher.test(contingency_table)
+  
+print(contingency_table)
+print(fisher_test)
+```
+
+```{r}
+top_p_50_features_PR_mosquito_significant_Mosquito <- top_features_PR_mosquito_significant_Mosquito
+
+top_p_50_features_PR_mosquito_significant_Mosquito <- top_p_50_features_PR_mosquito_significant_Mosquito[order(top_p_50_features_PR_mosquito_significant_Mosquito$p.value, decreasing = FALSE), ]
+
+top_p_50_features_PR_mosquito_significant_Mosquito <- top_p_50_features_PR_mosquito_significant_Mosquito[1:50,]
+```
+
+```{r}
+group_to_test <- "Aedes"
+
+df <- top_p_50_features_PR_mosquito_significant_Mosquito
+#df <- Plates14and15_VectorScan_BoostedOnly_results_list[[patient]]
+#df3 <- df[as.logical(df$'Group' == group_to_test),]
+df3 <- df[as.logical(df$'Family' == group_to_test),]
+
+temp1 <- nrow(df3)
+#temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Group' == group_to_test),]) - nrow(df3)
+#temp2 <- nrow(VectorScan[as.logical(VectorScan$'Group' == group_to_test),]) - nrow(df3)
+temp2 <- nrow(top_features_PR_mosquito_significant_Mosquito[as.logical(top_features_PR_mosquito_significant_Mosquito$'Family' == group_to_test),]) - nrow(df3)
+temp3 <- nrow(df) - nrow(df3)
+temp4 <- nrow(top_features_PR_mosquito_significant_Mosquito) - temp1 - temp2 - temp3
+#temp4 <- nrow(VectorScan) - temp1 - temp2 - temp3
+  
+paste0("Num ", group_to_test, " Hits ", temp1)
+paste0("Num ", group_to_test, " Not hits ", temp2)
+paste0("Num Non-", group_to_test, " Hits ", temp3 )
+paste0("Num Non-", group_to_test, " Not hits ", temp4)
+
+# Create a contingency table
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+# Assign column and row names for clarity
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c(group_to_test, paste0("Not ", group_to_test))
+
+contingencies <- rbind(contingencies, contingency_table)
+  fisher_test <- fisher.test(contingency_table)
+  
+print(contingency_table)
+print(fisher_test)
+
+group_to_test <- "Anopheles"
+df <- top_p_50_features_PR_mosquito_significant_Mosquito
+#df <- Plates14and15_VectorScan_BoostedOnly_results_list[[patient]]
+#df3 <- df[as.logical(df$'Group' == group_to_test),]
+df3 <- df[as.logical(df$'Family' == group_to_test),]
+
+temp1 <- nrow(df3)
+#temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Group' == group_to_test),]) - nrow(df3)
+#temp2 <- nrow(VectorScan[as.logical(VectorScan$'Group' == group_to_test),]) - nrow(df3)
+temp2 <- nrow(top_features_PR_mosquito_significant_Mosquito[as.logical(top_features_PR_mosquito_significant_Mosquito$'Family' == group_to_test),]) - nrow(df3)
+temp3 <- nrow(df) - nrow(df3)
+temp4 <- nrow(top_features_PR_mosquito_significant_Mosquito) - temp1 - temp2 - temp3
+#temp4 <- nrow(VectorScan) - temp1 - temp2 - temp3
+  
+paste0("Num ", group_to_test, " Hits ", temp1)
+paste0("Num ", group_to_test, " Not hits ", temp2)
+paste0("Num Non-", group_to_test, " Hits ", temp3 )
+paste0("Num Non-", group_to_test, " Not hits ", temp4)
+
+# Create a contingency table
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+# Assign column and row names for clarity
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c(group_to_test, paste0("Not ", group_to_test))
+
+contingencies <- rbind(contingencies, contingency_table)
+  fisher_test <- fisher.test(contingency_table)
+  
+print(contingency_table)
+print(fisher_test)
+
+group_to_test <- "Culex"
+df <- top_p_50_features_PR_mosquito_significant_Mosquito
+#df <- Plates14and15_VectorScan_BoostedOnly_results_list[[patient]]
+#df3 <- df[as.logical(df$'Group' == group_to_test),]
+df3 <- df[as.logical(df$'Family' == group_to_test),]
+
+temp1 <- nrow(df3)
+#temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Group' == group_to_test),]) - nrow(df3)
+#temp2 <- nrow(VectorScan[as.logical(VectorScan$'Group' == group_to_test),]) - nrow(df3)
+temp2 <- nrow(top_features_PR_mosquito_significant_Mosquito[as.logical(top_features_PR_mosquito_significant_Mosquito$'Family' == group_to_test),]) - nrow(df3)
+temp3 <- nrow(df) - nrow(df3)
+temp4 <- nrow(top_features_PR_mosquito_significant_Mosquito) - temp1 - temp2 - temp3
+#temp4 <- nrow(VectorScan) - temp1 - temp2 - temp3
+  
+paste0("Num ", group_to_test, " Hits ", temp1)
+paste0("Num ", group_to_test, " Not hits ", temp2)
+paste0("Num Non-", group_to_test, " Hits ", temp3 )
+paste0("Num Non-", group_to_test, " Not hits ", temp4)
+
+# Create a contingency table
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+# Assign column and row names for clarity
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c(group_to_test, paste0("Not ", group_to_test))
+
+contingencies <- rbind(contingencies, contingency_table)
+  fisher_test <- fisher.test(contingency_table)
+  
+print(contingency_table)
+print(fisher_test)
+```
+
+```{r}
+setwd('file path')
+
+seqs <- AAStringSet(top_features_PR_mosquito_significant_Mosquito$'AA Sequence')
+  # Add names from the sequence header column
+names(seqs) <- paste0(top_features_PR_mosquito_significant_Mosquito$id)
+
+writeXStringSet(seqs, filepath = "top_features_PR_mosquito_significant_Mosquito.faa")
+```
+
+cd [[appropriate file path]]
+makeblastdb -in top_features_PR_mosquito_significant_Mosquito.faa -out db -dbtype prot
+blastp -query top_features_PR_mosquito_significant_Mosquito.faa -db db  -evalue 1 -max_hsps 1 -max_target_seqs 100000  -word_size 7 -outfmt 6 -num_threads 10 -out top_features_PR_mosquito_significant_Mosquito.txt
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' top_features_PR_mosquito_significant_Mosquito.txt > top_features_PR_mosquito_significant_Mosquito.csv
+
+```{r}
+setwd('file path')
+Top_features_significant_Mosquito_BLAST <- read.csv('top_features_PR_mosquito_significant_Mosquito.csv', header = FALSE)
+Top_features_significant_Mosquito_BLAST <- Top_features_significant_Mosquito_BLAST[as.logical(Top_features_significant_Mosquito_BLAST$V12 >= 40),]
+
+Top_features_significant_Mosquito_BLAST$id <- Top_features_significant_Mosquito_BLAST[,2]
+
+edge_list <- Top_features_significant_Mosquito_BLAST[, c("V1", "V2")]
+g <- graph_from_data_frame(d = edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
+
+clusters <- cluster_louvain(g)
+membership_vector <- membership(clusters)
+cluster_sizes <- table(membership_vector)
+membership_df <- data.frame(id = as.numeric(names(membership_vector)), 
+                            ClusterID = as.integer(membership_vector))
+
+Top_features_significant_Mosquito_BLAST_membership_df <- inner_join(membership_df, VectorScan_cleaned, by = 'id')
+
+cluster_threshold <- 2
+valid_clusters <- names(cluster_sizes[cluster_sizes >= cluster_threshold])
+
+vertices_to_keep <- which(membership_vector %in% valid_clusters)
+g_filtered <- induced_subgraph(g, vids = vertices_to_keep)
+
+filtered_membership_vector <- membership_vector[vertices_to_keep]
+num_filtered_clusters <- length(unique(filtered_membership_vector))
+palette_size <- max(12, num_filtered_clusters)  # Ensure enough colors
+
+colors <- colorRampPalette(brewer.pal(12, "Set3"))(palette_size)
+cluster_colors <- colors[as.numeric(factor(filtered_membership_vector))]
+
+vertex_labels <- sapply(filtered_membership_vector, function(cluster_id) {
+  if (cluster_sizes[cluster_id] >= cluster_threshold) {
+    return(as.character(cluster_id))
+  } else {
+    return(NA)  
+  }
+})
+
+g_simplified <- simplify(g_filtered,  remove.loops = TRUE)
+
+morethan1_membership_df <- membership_df %>%
+  group_by(ClusterID) %>%             
+  filter(n() >= cluster_threshold) %>%                 
+  ungroup()      
+
+morethan1_membership_df <- inner_join(morethan1_membership_df, VectorScan_cleaned, by = 'id')
+morethan1_membership_df$ForAlignment <- paste0(">",morethan1_membership_df$id," ", morethan1_membership_df$'AA Sequence')
+
+Top_features_significant_Mosquito_morethan1_membership_df <- morethan1_membership_df[order(morethan1_membership_df$ClusterID, decreasing = FALSE), ]
+```
+
+```{r}
+Top_features_significant_Mosquito_morethan1_membership_df <- inner_join(Top_features_significant_Mosquito_morethan1_membership_df, top_features_PR_mosquito_significant_Mosquito, by = 'id')
+
+Top_features_significant_Mosquito_morethan1_membership_df <- Top_features_significant_Mosquito_morethan1_membership_df %>%
+  mutate(Direction = ifelse(log2fc > 0, "Exposed", "Negative"))
+
+direction_colors <- c("Exposed" = "#A23B60", "Negative" = "#BFBFBF")
+vertex_colors <- direction_colors[Top_features_significant_Mosquito_morethan1_membership_df$Direction]
+
+consistent_layout <- layout_with_fr(g_simplified)
+
+plot(g_simplified,
+     vertex.color = vertex_colors,  
+   vertex.label = vertex_labels,
+      vertex.size = 3,
+     vertex.label = vertex_labels,
+      vertex.label.cex = 0.6,
+     edge.arrow.size = 0.5,
+     main = "Peptides that emerge in 2+ people at Day 44",
+     layout = consistent_layout)
+
+plot(g_simplified,
+     vertex.color = vertex_colors,
+  # vertex.label = vertex_labels,
+     vertex.size = 5,
+     vertex.label = NA,
+     edge.arrow.size = 0.5,
+     main = "Peptides that emerge in 2+ people at Day 44",
+     layout = consistent_layout)
+  
+```
+
+```{r}
+temp <- Top_features_significant_Mosquito_morethan1_membership_df
+temp <- temp[as.logical(temp$Direction == "Exposed"),]
+
+setwd('file path')
+
+seqs <- AAStringSet(temp$'AA Sequence.x')
+names(seqs) <- paste0('PR_', temp$id)
+
+writeXStringSet(seqs, filepath = "PR_temp.faa")
+
+temp <- UpIn2PlusPeople_morethan1_membership_df
+
+seqs <- AAStringSet(temp$'AA Sequence')
+names(seqs) <- paste0("NIH_", temp$id)
+
+writeXStringSet(seqs, filepath = "NIH_temp.faa")
+```
+
+cd [[file path]]
+cat PR_temp.faa NIH_temp.faa > PR_and_NIH.faa 
+
+makeblastdb -in PR_and_NIH.faa -out db -dbtype prot
+blastp -query PR_and_NIH.faa -db db  -evalue 1 -max_hsps 1 -max_target_seqs 100000  -word_size 7 -outfmt 6 -num_threads 10 -out PR_and_NIH.txt
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' PR_and_NIH.txt > PR_and_NIH.csv
+
+```{r}
+setwd('file path')
+PR_and_NIH_BLAST <- read.csv('PR_and_NIH.csv', header = FALSE)
+PR_and_NIH_BLAST <- PR_and_NIH_BLAST[PR_and_NIH_BLAST$V12 >= 40, ]
+PR_and_NIH_BLAST$id <- str_extract(PR_and_NIH_BLAST$V2, "(?<=_)\\d+")
+
+edge_list <- PR_and_NIH_BLAST[, c("V1", "V2")]
+g <- graph_from_data_frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
+
+clusters <- cluster_louvain(g)
+membership_vector <- membership(clusters)
+membership_df <- data.frame(
+  id = names(membership_vector),
+  ClusterID = as.integer(membership_vector)
+)
+
+cluster_threshold <- 3
+cluster_sizes <- table(membership_vector)
+valid_clusters <- as.integer(names(cluster_sizes[cluster_sizes >= cluster_threshold]))
+membership_df <- membership_df[membership_df$ClusterID %in% valid_clusters, ]
+
+edges_within_clusters <- membership_df %>%
+  group_by(ClusterID) %>%
+  filter(n() > 1) %>%
+  summarise(edge_list = list(as.data.frame(t(combn(id, 2)))), .groups = 'drop')
+
+edges_df <- bind_rows(edges_within_clusters$edge_list)
+colnames(edges_df) <- c("from", "to")
+
+g2 <- graph_from_data_frame(edges_df, directed = FALSE)
+g2 <- simplify(g2)
+g2_tbl <- as_tbl_graph(g2)
+g2_tbl <- g2_tbl %>%
+  mutate(
+    type = case_when(
+      grepl("PR", name, ignore.case = TRUE)  ~ "PR",
+      grepl("NIH", name, ignore.case = TRUE) ~ "NIH",
+      TRUE ~ "Other"
+    ),
+    color = case_when(
+      type == "PR"    ~ alpha("#F8766D", 0.7),
+      type == "NIH"   ~ alpha("#00BFC4", 0.7),
+      TRUE            ~ alpha("grey80", 0.7)
+    )
+  )
+
+set.seed(42)
+my_layout <- create_layout(g2_tbl, layout = "fr")
+
+my_layout <- my_layout %>%
+  left_join(membership_df, by = c("name" = "id"))
+ggraph(my_layout) +
+  geom_edge_link(color = "grey60", alpha = 0.5) +
+  geom_node_point(
+    data = ~dplyr::filter(., type != "PR"),
+    aes(x = x, y = y, fill = type),
+    shape = 21,
+    size = 3,
+    color = "black",   
+    stroke = .5,
+    alpha = 0.5
+  ) +
+  # PR nodes on top
+  geom_node_point(
+    data = ~dplyr::filter(., type == "PR"),
+    aes(x = x, y = y, fill = type),
+    shape = 21,
+    size = 3,
+    color = "black",
+    stroke = 0.5,
+    alpha = 0.9
+  ) +
+  coord_fixed()+
+  theme_graph() +
+  labs(title = "Peptides (PR nodes on top, semi-transparent)") +
+  scale_fill_manual(
+    values = c("PR" = "#F8766D", "NIH" = "#00BFC4", "Other" = "grey80")
+  ) +
+  guides(fill = guide_legend(override.aes = list(size = 5, alpha = 1)))
+
+# Add cluster labels at centroid
+cluster_centroids <- my_layout %>%
+  group_by(ClusterID) %>%
+  summarise(x = mean(x), y = mean(y), .groups = 'drop')
+
+ggraph(my_layout) +
+  geom_edge_link(color = "grey60", alpha = 0.5) +
+  geom_node_point(
+    data = ~dplyr::filter(., type != "PR"),
+    aes(x = x, y = y, fill = type),
+    shape = 21, size = 3, color = "black", stroke = .5, alpha = 0.5
+  ) +
+  geom_node_point(
+    data = ~dplyr::filter(., type == "PR"),
+    aes(x = x, y = y, fill = type),
+    shape = 21, size = 3, color = "black", stroke = 0.5, alpha = 0.9
+  ) +
+  geom_text(
+    data = cluster_centroids,
+    aes(x = x, y = y, label = ClusterID),
+    size = 6, color = "black", fontface = "bold", alpha = 0.7
+  ) +
+  coord_fixed() +
+  theme_graph() +
+  labs(title = "Peptides (Each cluster labeled by ClusterID)") +
+  scale_fill_manual(values = c("PR" = "#F8766D", "NIH" = "#00BFC4", "Other" = "grey80")) +
+  guides(fill = guide_legend(override.aes = list(size = 5, alpha = 1)))
+```
