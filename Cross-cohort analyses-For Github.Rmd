@@ -1,0 +1,671 @@
+
+```{r}
+# Load relevant libraries 
+library('dplyr')
+library('corrplot')
+library('writexl')
+library('readxl')
+library('seqinr')
+library('ggplot2')
+library('gridExtra')
+library('ggfortify')
+library('pheatmap')
+library('Biostrings')
+library('tidyverse')
+library('igraph')
+library('RColorBrewer')
+```
+
+```{r}
+Plates22and27_RPKs <- read_xlsx('Plates22and27_Combined_df.xlsx')
+Plates22and27_RPKs <- Plates22and27_RPKs[,1:63]
+Plate23_RPKs <- read_xlsx('Plate23_BITE_BothTimepoints_Seropositive_RPKs_df.xlsx')
+Plate28_RPKs <- read_xlsx('Plate28_Mali_BothTimepoints_Seropositive_RPKs_df.xlsx')
+```
+
+```{r}
+combined <- Plates22and27_RPKs %>%
+  full_join(Plate23_RPKs, by = "id") %>%
+  full_join(Plate28_RPKs, by = "id")
+
+plate23_cols <- setdiff(names(Plate23_RPKs), "id")
+
+combined <- combined %>%
+  mutate(across(all_of(plate23_cols), ~ replace_na(., 0)))
+
+combined <- inner_join(combined, VectorScan_cleaned, by = 'id')
+
+combined <- combined %>% relocate(id, .after = last_col())
+```
+
+```{r}
+temp <- combined[as.logical(combined$Group == "Mosquito"),]
+counts_of_interest <- data.frame(
+  column = names(temp),
+  n_counts  = colSums(temp > 0, na.rm = TRUE))
+```
+
+```{r}
+temp <- combined[as.logical(combined$Family == "Falciparum"),]
+counts_of_interest <- data.frame(
+  column = names(temp),
+  n_counts  = colSums(temp > 0, na.rm = TRUE))
+```
+
+```{r}
+temp <- combined[as.logical(combined$Family == "Anopheles"),]
+counts_of_interest <- data.frame(
+  column = names(temp),
+  n_counts  = colSums(temp > 0, na.rm = TRUE))
+```
+
+```{r}
+Plates23_28_22and27_SeropositiveInAnyone <- combined[as.logical(rowSums(combined[,1:128])>0),]
+```
+
+Plasmodium analysis 
+
+```{r}
+# Find all the Falciparum-derived peptides that are seropositive in any of the human samples 
+
+Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK <- Plates23_28_22and27_SeropositiveInAnyone[as.logical(Plates23_28_22and27_SeropositiveInAnyone$Family == "Falciparum"),]
+
+Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK <- Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK[as.logical(rowSums(Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK[,1:128])>0),]
+
+# Do the blastp search
+
+setwd('filepath')
+  
+seqs <- AAStringSet(Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK$'AA Sequence')
+names(seqs) <- paste0(Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK$Subject, "_", Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK$id)
+
+in_file_name <- paste0('Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK.fasta')
+txt_file_name <- paste0('Plates23_28_22and27_Master_Plasmodium_clusters.txt')
+csv_file_name <- paste0('Plates23_28_22and27_Master_Plasmodium_clusters.csv')
+
+writeXStringSet(seqs, filepath = in_file_name)
+  
+system(sprintf("ulimit -n unlimited"))
+system(sprintf("makeblastdb -in %s -out db -dbtype prot", in_file_name))
+system(sprintf("blastp -query %s -db db  -evalue 1 -max_hsps 1 -max_target_seqs 100000 -word_size 7 -outfmt 6 -out %s", 
+                   in_file_name, txt_file_name))
+system(sprintf("awk 'BEGIN{FS=\"\\t\"; OFS=\",\"} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' %s > %s", 
+                   txt_file_name, csv_file_name))
+```
+
+```{r}
+# Do the network graph clustering based on sequence identity 
+
+rm(membership_df)
+rm(Plates23_28_22and27_Master_Plasmodium_clusters_morethan1_membership_df)
+
+setwd('filepath')
+
+Subject_BLAST <- read.csv('Plates23_28_22and27_Master_Plasmodium_clusters.csv', header = FALSE)
+Subject_BLAST <- Subject_BLAST[as.logical(Subject_BLAST$V12 >= 40), ]
+
+edge_list <- Subject_BLAST[, c("V1", "V2")]
+g <- graph_from_data_frame(d = edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
+
+# Do the Louvain clustering
+set.seed(123)  # Makes the results reproducible for the sake of reproducing the findings in the paper, since sometimes the clustering can change by 1-2 clusters, which offsets the Cluster IDs 
+
+clusters <- cluster_louvain(g)
+membership_vector <- membership(clusters)
+
+cluster_sizes <- table(membership_vector)
+
+membership_df <- data.frame(
+  name      = names(membership_vector),   
+  ClusterID = as.integer(membership_vector),
+  stringsAsFactors = FALSE
+)
+
+# Only keep clusters that have 2+ members, basically requiring that a peptide has similarity to another peptide to be included in downstream analyses 
+cluster_threshold <- 2
+valid_clusters <- names(cluster_sizes[cluster_sizes >= cluster_threshold])
+
+vertices_to_keep <- which(membership_vector %in% valid_clusters)
+g_filtered <- induced_subgraph(g, vids = vertices_to_keep)
+
+filtered_membership_vector <- membership_vector[vertices_to_keep]
+
+g_simplified <- simplify(g_filtered, remove.loops = TRUE)
+
+vertex_names_plot <- V(g_simplified)$name
+Plates23_28_22and27_Master_Plasmodium_clusters_morethan1_membership_df <- membership_df %>%
+  filter(name %in% vertex_names_plot)
+
+Plates23_28_22and27_Master_Plasmodium_clusters_morethan1_membership_df$id <- as.numeric(sub(".*_", "", Plates23_28_22and27_Master_Plasmodium_clusters_morethan1_membership_df$name))
+
+Plates23_28_22and27_Master_Plasmodium_cluster_props <- Plates23_28_22and27_Master_Plasmodium_clusters_morethan1_membership_df %>%
+  group_by(ClusterID) %>%
+  summarise(
+    n        = n(),
+    .groups  = "drop"
+  )
+```
+
+```{r}
+Plates23_28_22and27_Master_Plasmodium_clusters_withRPK <- inner_join(Plates23_28_22and27_Master_Plasmodium_clusters_morethan1_membership_df, Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK, by = 'id')
+
+Plates23_28_22and27_Master_Plasmodium_cluster_sums <- Plates23_28_22and27_Master_Plasmodium_clusters_withRPK %>%
+  group_by(ClusterID) %>%
+  summarise(
+    across(3:130, \(x) sum(x, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+Plates23_28_22and27_Master_Plasmodium_cluster_sums_IDs <- Plates23_28_22and27_Master_Plasmodium_cluster_sums$ClusterID
+
+Plates23_28_22and27_Master_Plasmodium_cluster_sums <- data.frame((t((Plates23_28_22and27_Master_Plasmodium_cluster_sums[,2:129]))))
+colnames(Plates23_28_22and27_Master_Plasmodium_cluster_sums) <- Plates23_28_22and27_Master_Plasmodium_cluster_sums_IDs
+
+Plates23_28_22and27_Master_Plasmodium_cluster_sums$Cohort <- c(rep('US', 62), rep('US', 14), rep('Day44', 14), rep('Month0', 19), rep('Month7', 19))
+```
+
+```{r}
+df_long <- Plates23_28_22and27_Master_Plasmodium_cluster_sums %>% 
+  pivot_longer(
+    cols = -c(Cohort),        
+    names_to  = "ClusterID",
+    values_to = "value"
+  )
+
+wilcox_res <- df_long %>%
+  filter(Cohort %in% c("US", "Month7")) %>%
+  group_by(ClusterID) %>%
+  summarise(
+    p_value = wilcox.test(value ~ Cohort)$p.value,
+    median_US   = median(value[Cohort == "US"],   na.rm = TRUE),
+    median_Mali = median(value[Cohort == "Month7"], na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adj   = p.adjust(p_value, method = "BH"),
+    log2FC  = log2((median_Mali + 1) / (median_US + 1))  # Mali / US
+  )
+
+sig_clusters <- wilcox_res %>%
+  filter(p_adj < 0.05) %>%
+  pull(ClusterID)
+
+Plates23_28_22and27_Master_Plasmodium_sig_clusters <- sig_clusters
+
+df_long_sig <- df_long %>%
+  filter(ClusterID %in% sig_clusters)
+
+ggplot(df_long_sig, aes(x = Cohort, y = log2(value+1), fill = Cohort)) +
+   scale_fill_manual(values  = c("US" = "gray", "Mali" = "red"), 
+                    name = "Cohort") +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 1) +
+  facet_wrap(~ ClusterID, scales = "free_y") +
+  labs(x = "group", y = "Cluster sum (log2)", title = "Cluster values by group status") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+```
+
+```{r}
+temp <- Plates23_28_22and27_Master_Plasmodium_clusters_morethan1_membership_df
+temp <- inner_join(Plates23_28_22and27_Master_Plasmodium_clusters_morethan1_membership_df, VectorScan, by = 'id')
+```
+
+```{r}
+Plates23_28_22and27_Master_Plasmodium_sig_clusters <- data.frame("ClusterID" = Plates23_28_22and27_Master_Plasmodium_sig_clusters)
+Plates23_28_22and27_Master_Plasmodium_sig_clusters$n <- Plates23_28_22and27_Master_Plasmodium_cluster_props$n[match(Plates23_28_22and27_Master_Plasmodium_sig_clusters$ClusterID, Plates23_28_22and27_Master_Plasmodium_cluster_props$ClusterID)]
+```
+
+```{r}
+# Plot the cluster reactivity scores from the significantly different clusters 
+
+heat_mat <- Plates23_28_22and27_Master_Plasmodium_cluster_sums %>%
+  dplyr::select(Plates23_28_22and27_Master_Plasmodium_sig_clusters$ClusterID,  
+         Cohort) 
+
+heat_mat <- heat_mat[,1:(ncol(heat_mat)-1)]/Plates23_28_22and27_Master_Plasmodium_sig_clusters$n
+
+annotation_row <- data.frame(
+  Cohort = c(rep('CDC', 62),  rep('NIH', 28), rep('Mali', 38))
+)
+rownames(annotation_row) <- rownames(heat_mat)
+
+annotation_col <- annotation_row
+
+heat_mat_num <- heat_mat %>%
+  as.matrix()
+
+annotation_colors <- list(
+  Cohort = c("Mali" = "orange", "NIH" = "#3f8e57" , "CDC" = "#598BC5")
+)
+  
+mat <- t(heat_mat_num)
+
+# Fixing the color scale to make the clusters show up better since there's a pretty big range 
+upper <- quantile(mat, 0.97, na.rm = TRUE)  
+n_col  <- 50
+cols   <- colorRampPalette(c("white", "red", "purple"))(n_col)
+breaks <- seq(from = 0, to = upper, length.out = n_col + 1)
+mat_capped <- pmin(mat, upper)
+
+pheatmap(
+   mat,
+  cluster_rows      = TRUE,
+  cluster_cols      = FALSE,
+  annotation_col    = annotation_col,
+  annotation_colors = annotation_colors,
+  color             = cols,
+  breaks            = breaks,
+  show_rownames     = FALSE,
+  show_colnames     = FALSE,
+  main              = "Significant Plasmodium clusters (Mali > US)"
+)
+```
+
+```{r}
+Plates23_28_22and27_Master_Plasmodium_peptides_from_significant_clusters <- Plates23_28_22and27_Master_Plasmodium_clusters_morethan1_membership_df %>%
+  filter( ClusterID %in% Plates23_28_22and27_Master_Plasmodium_sig_clusters$ClusterID)
+
+Plates23_28_22and27_Master_Plasmodium_peptides_from_significant_clusters <- Plates23_28_22and27_Master_Plasmodium_peptides_from_significant_clusters %>%
+  arrange(ClusterID)
+
+Plates23_28_22and27_Master_Plasmodium_peptides_from_significant_clusters <- inner_join(Plates23_28_22and27_Master_Plasmodium_peptides_from_significant_clusters, VectorScan, by = 'id')
+```
+
+```{r}
+Plates23_28_22and27_Master_Plasmodium_peptides_from_significant_clusters_RPKs <- inner_join(Plates23_28_22and27_Master_Plasmodium_peptides_from_significant_clusters, Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK, by = 'id') 
+```
+
+```{r}
+setwd('filepath')
+
+# Create an AAStringSet object
+seqs <- AAStringSet(Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK$'AA Sequence')
+  # Add names from the sequence header column
+names(seqs) <- paste0(Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK$id)
+writeXStringSet(seqs, filepath = "Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK.faa")
+```
+
+cd 'filepath' 
+
+makeblastdb -in Source_of_Top_Pfal_Clusters.faa -out db -parse_seqids -dbtype prot 
+blastp -query Plates23_28_22and27_Master_Plasmodium_SeropositiveInAnyone_RPK.faa -db db -outfmt 6 -max_hsps 1 -out Top_Pfal_Clusters_Mapped.txt 
+
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' Top_Pfal_Clusters_Mapped.txt > Top_Pfal_Clusters_Mapped.csv
+
+```{r}
+Top_Pfal_Clusters_Mapped <- read.csv('filepath/Top_Pfal_Clusters_Mapped.csv', header=FALSE)
+Top_Pfal_Clusters_Mapped$seq_id <- Top_Pfal_Clusters_Mapped[,1]
+Top_Pfal_Clusters_Mapped <- Top_Pfal_Clusters_Mapped[as.logical(Top_Pfal_Clusters_Mapped$V12 >= 40), ]
+
+Top_Pfal_Clusters_Mapped <- Top_Pfal_Clusters_Mapped %>%
+  separate( col   = seq_id, into  = c("id", "ClusterID"), sep   = "_", remove = TRUE ) %>% mutate(id = as.numeric(id)  )
+
+Top_Pfal_Clusters_Mapped$AANumber <- Top_Pfal_Clusters_Mapped$V9  + (Top_Pfal_Clusters_Mapped$V8 - Top_Pfal_Clusters_Mapped$V7)/2
+```
+
+```{r}
+Seroprevalence_month7 <- Plate28_RPKs[,20:ncol(Plate28_RPKs)]
+Seroprevalence_month7$id <- Plate28_RPKs$id
+Seroprevalence_month7$Num_seropositive <- rowSums(Seroprevalence_month7[,1:19]>0)
+Seroprevalence_month7$Per_seropositive <- Seroprevalence_month7$Num_seropositive/19*100
+```
+
+```{r}
+Top_Pfal_Clusters_Mapped$Per_seropositive <- Seroprevalence_month7$Per_seropositive[match(Top_Pfal_Clusters_Mapped$id,Seroprevalence_month7$id)]
+```
+
+```{r}
+write_xlsx(Top_Pfal_Clusters_Mapped, "Top_Pfal_Clusters_Mapped.xlsx")
+```
+
+Mosquito analysis 
+
+```{r}
+# Find mosquito-derived peptides that are seroreactive in at least one sample 
+
+Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK <- Plates23_28_22and27_SeropositiveInAnyone[as.logical(Plates23_28_22and27_SeropositiveInAnyone$Group == "Mosquito"),]
+
+Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK <- Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK[as.logical(rowSums(Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK[,1:128])>0),]
+
+setwd('filepath')
+  
+seqs <- AAStringSet(Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK$'AA Sequence')
+names(seqs) <- paste0(Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK$Subject, "_", Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK$id)
+
+in_file_name <- paste0('Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK.fasta')
+txt_file_name <- paste0('Plates23_28_22and27_Master_Mosquito_clusters.txt')
+csv_file_name <- paste0('Plates23_28_22and27_Master_Mosquito_clusters.csv')
+
+writeXStringSet(seqs, filepath = in_file_name)
+  
+system(sprintf("ulimit -n unlimited"))
+system(sprintf("makeblastdb -in %s -out db -dbtype prot", in_file_name))
+system(sprintf("blastp -query %s -db db  -evalue 1 -max_hsps 1 -max_target_seqs 100000 -word_size 7 -outfmt 6 -out %s", 
+                   in_file_name, txt_file_name))
+system(sprintf("awk 'BEGIN{FS=\"\\t\"; OFS=\",\"} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' %s > %s", 
+                   txt_file_name, csv_file_name))
+```
+
+```{r}
+setwd('filepath')
+
+Subject_BLAST <- read.csv('Plates23_28_22and27_Master_Mosquito_clusters.csv', header = FALSE)
+Subject_BLAST <- Subject_BLAST[as.logical(Subject_BLAST$V12 >= 40), ]
+
+edge_list <- Subject_BLAST[, c("V1", "V2")]
+g <- graph_from_data_frame(d = edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
+
+set.seed(123) 
+clusters <- cluster_louvain(g)
+membership_vector <- membership(clusters)
+
+cluster_sizes <- table(membership_vector)
+
+membership_df <- data.frame(
+  name      = names(membership_vector),          
+  ClusterID = as.integer(membership_vector),
+  stringsAsFactors = FALSE
+)
+
+cluster_threshold <- 2
+valid_clusters <- names(cluster_sizes[cluster_sizes >= cluster_threshold])
+
+vertices_to_keep <- which(membership_vector %in% valid_clusters)
+g_filtered <- induced_subgraph(g, vids = vertices_to_keep)
+
+filtered_membership_vector <- membership_vector[vertices_to_keep]
+
+g_simplified <- simplify(g_filtered, remove.loops = TRUE)
+
+vertex_names_plot <- V(g_simplified)$name
+Plates23_28_22and27_Master_Mosquito_clusters_morethan1_membership_df <- membership_df %>%
+  filter(name %in% vertex_names_plot)
+
+Plates23_28_22and27_Master_Mosquito_clusters_morethan1_membership_df$id <- as.numeric(sub(".*_", "", Plates23_28_22and27_Master_Mosquito_clusters_morethan1_membership_df$name))
+
+Plates23_28_22and27_Master_Mosquito_cluster_props <- Plates23_28_22and27_Master_Mosquito_clusters_morethan1_membership_df %>%
+  group_by(ClusterID) %>%
+  summarise(
+    n        = n(),
+    .groups  = "drop"
+  )
+
+```
+
+```{r}
+Plates23_28_22and27_Master_Mosquito_clusters_withRPK <- inner_join(Plates23_28_22and27_Master_Mosquito_clusters_morethan1_membership_df, Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK, by = 'id')
+
+Plates23_28_22and27_Master_Mosquito_cluster_sums <- Plates23_28_22and27_Master_Mosquito_clusters_withRPK %>%
+  group_by(ClusterID) %>%
+  summarise(
+    across(3:130, \(x) sum(x, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+Plates23_28_22and27_Master_Mosquito_cluster_sums_IDs <- Plates23_28_22and27_Master_Mosquito_cluster_sums$ClusterID
+
+Plates23_28_22and27_Master_Mosquito_cluster_sums <- data.frame((t((Plates23_28_22and27_Master_Mosquito_cluster_sums[,2:129]))))
+colnames(Plates23_28_22and27_Master_Mosquito_cluster_sums) <- Plates23_28_22and27_Master_Mosquito_cluster_sums_IDs
+
+Plates23_28_22and27_Master_Mosquito_cluster_sums$Cohort <- c(rep('US', 62), rep('US', 14), rep('Day44', 14), rep('Month0', 19), rep('Month7', 19))
+```
+
+```{r}
+df_long <- Plates23_28_22and27_Master_Mosquito_cluster_sums %>% 
+  pivot_longer(
+    cols = -c(Cohort),      
+    names_to  = "ClusterID",
+    values_to = "value"
+  )
+
+wilcox_res <- df_long %>%
+  filter(Cohort %in% c("US", "Month7")) %>%
+  group_by(ClusterID) %>%
+  summarise(
+    p_value = wilcox.test(value ~ Cohort)$p.value,
+    median_US   = median(value[Cohort == "US"],   na.rm = TRUE),
+    median_Mali = median(value[Cohort == "Month7"], na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_adj   = p.adjust(p_value, method = "BH"),
+    log2FC  = log2((median_Mali + 1) / (median_US + 1))  # Mali / US
+  )
+
+# Only looking at the clusters where the scores were significantly higher in Mali 
+sig_clusters <- wilcox_res %>%
+  filter(p_adj < 0.05) %>%
+   filter(log2FC > 0) %>%
+  pull(ClusterID)
+
+Plates23_28_22and27_Master_Mosquito_sig_clusters <- sig_clusters
+
+df_long_sig <- df_long %>%
+  filter(ClusterID %in% sig_clusters)
+
+ggplot(df_long_sig, aes(x = Cohort, y = log2(value+1), fill = Cohort)) +
+   scale_fill_manual(values  = c("US" = "gray", "Mali" = "red"), 
+                    name = "Cohort") +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 1) +
+  facet_wrap(~ ClusterID, scales = "free_y") +
+  labs(x = "group", y = "Cluster sum (log2)", title = "Cluster values by group status") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+
+Plates23_28_22and27_Master_Mosquito_sig_clusters <- data.frame("ClusterID" = Plates23_28_22and27_Master_Mosquito_sig_clusters)
+Plates23_28_22and27_Master_Mosquito_sig_clusters$n <- Plates23_28_22and27_Master_Mosquito_cluster_props$n[match(Plates23_28_22and27_Master_Mosquito_sig_clusters$ClusterID, Plates23_28_22and27_Master_Mosquito_cluster_props$ClusterID)]
+```
+
+```{r}
+# Heatmap of the significant clusters 
+
+heat_mat <- Plates23_28_22and27_Master_Mosquito_cluster_sums %>%
+  dplyr::select(Plates23_28_22and27_Master_Mosquito_sig_clusters$ClusterID,   # cluster columns
+         Cohort)                                                     # keep Cohort for annotation
+
+heat_mat <- heat_mat[,1:(ncol(heat_mat)-1)]/Plates23_28_22and27_Master_Mosquito_sig_clusters$n
+
+
+annotation_row <- data.frame(
+  Cohort = c(rep('CDC', 62),  rep('NIH', 28), rep('Mali', 38))
+)
+rownames(annotation_row) <- rownames(heat_mat)
+
+annotation_col <- annotation_row
+
+heat_mat_num <- heat_mat %>%
+  as.matrix()
+
+annotation_colors <- list(
+  Cohort = c("Mali" = "orange", "NIH" = "#3f8e57" , "CDC" = "#598BC5")
+)
+  
+mat <- t(heat_mat_num)
+
+# Fixing the color scale to make the clusters show up better since there's a pretty big range 
+upper <- quantile(mat, 0.97, na.rm = TRUE)  
+n_col  <- 50
+cols   <- colorRampPalette(c("white", "red", "purple"))(n_col)
+breaks <- seq(from = 0, to = upper, length.out = n_col + 1)
+mat_capped <- pmin(mat, upper)
+
+pheatmap(
+   mat,
+  cluster_rows      = FALSE,
+  cluster_cols      = FALSE,
+  annotation_col    = annotation_col,
+  annotation_colors = annotation_colors,
+  color             = cols,
+  breaks            = breaks,
+  show_rownames     = TRUE,
+  show_colnames     = FALSE,
+  main              = "Significant Plasmodium clusters (Mali > US)"
+)
+```
+
+
+```{r}
+Plates23_28_22and27_Master_Mosquito_peptides_from_significant_clusters <- Plates23_28_22and27_Master_Mosquito_clusters_morethan1_membership_df %>%
+  filter( ClusterID %in% Plates23_28_22and27_Master_Mosquito_sig_clusters$ClusterID)
+
+Plates23_28_22and27_Master_Mosquito_peptides_from_significant_clusters <- Plates23_28_22and27_Master_Mosquito_peptides_from_significant_clusters %>%
+  arrange(ClusterID)
+
+Plates23_28_22and27_Master_Mosquito_peptides_from_significant_clusters_RPKs <- inner_join(Plates23_28_22and27_Master_Mosquito_peptides_from_significant_clusters, Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK, by = 'id') 
+```
+
+```{r}
+# To identify if any mosquito genus has overrepresentation among these peptides 
+
+df  <- Plates23_28_22and27_Master_Mosquito_peptides_from_significant_clusters_RPKs
+larger_set <- Plates23_28_22and27_Master_Mosquito_clusters_withRPK
+
+families <- sort(unique(larger_set$Family))
+
+fisher_results_list <- lapply(families, function(group_to_test) {
+  
+  df2 <- df[df$Family == group_to_test, ]
+  
+  temp1 <- nrow(df2) # Clustered & in genus X 
+  temp2 <- nrow(larger_set[larger_set$Family == group_to_test, ]) - temp1  # Not clustered & in genus X
+  temp3 <- nrow(df) - temp1 # Clustered & not in genus X
+  temp4 <- nrow(larger_set) - temp1 - temp2 - temp3  # Not clustered & not in genus X
+  
+  contingency_table <- matrix(c(temp1, temp2,
+                                temp3, temp4),
+                              nrow = 2,
+                              byrow = TRUE,
+                              dimnames = list(
+                                Clustered = c("Yes", "No"),
+                                Family    = c(group_to_test, "Other")
+                              ))
+  
+  ft <- fisher.test(contingency_table)
+  
+  data.frame(
+    Family       = group_to_test,
+    clustered_in_genus  = temp1,
+    not_clustered_in_genus   = temp2,
+    clustered_not_genus = temp3,
+    not_clustered_not_genus  = temp4,
+    odds_ratio  = unname(ft$estimate),
+    conf_low           = ft$conf.int[1],
+    conf_high          = ft$conf.int[2],
+    p_value     = ft$p.value,
+    stringsAsFactors = FALSE
+  )
+})
+
+fisher_results <- do.call(rbind, fisher_results_list)
+fisher_results$p_adj <- p.adjust(fisher_results$p_value, method = "bonferroni") # Chose bonferroni because there is a small number of comparisons
+fisher_results$significant <- fisher_results$p_adj < 0.05
+fisher_results
+```
+
+Orthogroup analysis for the mosquito-derived peptides 
+
+```{r}
+Plates23_28_22and27_Master_Mosquito_peptides_from_significant_clusters_Orthogroups <- inner_join(Plates23_28_22and27_Master_Mosquito_peptides_from_significant_clusters, VectorScan_Mosquito_Orthogroups, by = 'id')
+```
+
+```{r}
+nrow(VectorScan_cleaned)
+nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$Group == "Mosquito"),])
+nrow(Plates23_28_22and27_Master_Mosquito_SeropositiveInAnyone_RPK)
+nrow(Plates23_28_22and27_Master_Mosquito_clusters_morethan1_membership_df)
+```
+
+```{r}
+hits <- data.frame(id = Plates23_28_22and27_Master_Mosquito_clusters_morethan1_membership_df$id)
+hits <- inner_join(hits, VectorScan_Mosquito_Orthogroups, by = 'id')
+
+hits_table <- data.frame(table(hits$'OrthoMCL group id_from_Protein'))
+
+VectorScan_Orthogroup_table <-  data.frame(table(VectorScan_Mosquito_Orthogroups$'OrthoMCL group id_from_Protein'))
+
+hits_table <- inner_join(hits_table, VectorScan_Orthogroup_table, by = 'Var1')
+
+colnames(hits_table) <- c("Annotation", "Annotation Hit", "VectorScan")
+
+hits_table$'Annotation Not hit' <- hits_table$VectorScan - hits_table$'Annotation Hit'
+
+hits_table$'Not Annotation Hit' <- sum(hits_table[,2])-hits_table$`Annotation Hit`
+
+hits_table$'Not Annotation Not Hit' <- sum(VectorScan_Orthogroup_table[,2]) - hits_table$'Annotation Hit' - hits_table$'Annotation Not hit' - hits_table$'Not Annotation Hit'
+
+temp <- hits_table 
+
+temp_table_ordered <- temp %>%
+  arrange(desc(`Annotation Hit`))
+
+# Only plot the top 10 groups for the sake of the figure
+top_temp <- head(temp_table_ordered, 10)
+
+my_plot <- ggplot(top_temp, aes(x = reorder(Annotation, `Annotation Hit`), y = `Annotation Hit`)) +
+  geom_bar(stat = "identity", fill = "#3A54A5") +
+  coord_flip() +
+  labs(
+    title = "Orthogroups with the largest representation among clustered peptides",
+    x = "Orthogroup Annotation",
+    y = "Number of peptides from Orthogroup X"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 12, hjust = 1))  
+
+print(my_plot)
+```
+
+
+```{r}
+# Enrichment analysis 
+
+hits_table$p_value <- NA
+
+for (i in 1:nrow(hits_table)) {
+  annotation_hit <- hits_table[i, "Annotation Hit"]
+  annotation_not_hit <- hits_table[i, "Annotation Not hit"]
+  not_annotation_hit <- hits_table[i, "Not Annotation Hit"]
+  not_annotation_not_hit <- hits_table[i, "Not Annotation Not Hit"]
+  
+  contingency_table <- matrix(c(annotation_hit, annotation_not_hit,
+                                not_annotation_hit, not_annotation_not_hit),
+                              nrow = 2,
+                              byrow = TRUE)
+  
+  test_result <- fisher.test(contingency_table)
+  
+  hits_table$p_value[i] <- test_result$p.value
+}
+
+hits_table$p_adj <- p.adjust(hits_table$p_value, method = "BH")
+  
+significant_hits_table <- hits_table[as.logical(hits_table$p_adj < 0.05),]
+significant_hits_table$'-log10(p)' <- -log10(significant_hits_table$p_adj)
+
+significant_hits_table_ordered <- significant_hits_table %>%
+ arrange(desc(`-log10(p)`))
+top_significant_hits <- head(significant_hits_table_ordered, 10)
+
+my_plot <- ggplot(top_significant_hits, aes(x = reorder(Annotation, `-log10(p)`), y = `Annotation Hit`, fill = `-log10(p)`)) +
+  geom_bar(stat = "identity") +
+  coord_flip() + 
+  labs(
+    title = "Orthogroups with the most significant enrichment among clustered peptides",
+    x = "Orthogroup Annotation",
+    y = "Number of peptides from Orthogroup X"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 12, hjust = 1)) 
+
+print(my_plot)
+```
