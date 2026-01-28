@@ -1,0 +1,108 @@
+Updated Jan 2026 -  Using the newer version of OrthoMCL (7.0 release)
+
+Get the protein sequences used to make the vector portion of the library 
+
+```{r}
+Vector_Sequences <- readAAStringSet("Library_1_2_SignalP.faa")
+```
+
+Performed DIAMOND mapping to identify OrthoMCL entries for each protein.
+
+```{r}
+OrthoMCL_DIAMOND <- read_delim("2025_01_06_OrthoMCL_DIAMONDMapping.txt")
+```
+
+```{r}
+paste0('Number of proteins without an Orthogroup label: ',  sum(OrthoMCL_DIAMOND$`OrthoMCL group id` == -1))
+paste0('Number of proteins with an Orthogroup label: ',  sum(OrthoMCL_DIAMOND$`OrthoMCL group id` != -1))
+```
+
+Map the Orthogroup back to the proteins in VectorScan
+```{r}
+VectorScan_Vector_Orthogroups <- VectorScan
+
+for(i in 1:nrow(OrthoMCL_DIAMOND)) {
+#for(i in 1:100) {
+  # Get the current Query sequence id
+  query_id <- OrthoMCL_DIAMOND$`Query sequence id`[i]
+  
+  # Use str_detect to find matching descriptions
+  matches <- str_detect(VectorScan_Vector_Orthogroups$Description, fixed(query_id))
+  
+  # Add columns from the matching OrthoMCL_DIAMOND row to VectorScan_Vector_Orthogroups
+  if(any(matches)) {
+    for(col_name in names(OrthoMCL_DIAMOND)) {
+      if(col_name != "Query sequence id") {
+        new_col_name <- paste0(col_name, "_from_Protein")
+        if(!new_col_name %in% names(VectorScan_Vector_Orthogroups)) {
+          VectorScan_Vector_Orthogroups[[new_col_name]] <- NA
+        }
+        VectorScan_Vector_Orthogroups[matches, new_col_name] <- OrthoMCL_DIAMOND[i, col_name]
+      }
+    }
+  }
+}
+```
+
+```{r}
+VectorScan_Mosquito_Orthogroups <- VectorScan_Vector_Orthogroups[as.logical(VectorScan_Vector_Orthogroups$Group == "Mosquito"),]
+```
+
+Manually adding information for the peptides that didn't get an Orthogroup searched (i.e., the anopheles sequences taken from the Falciparome library)
+
+```{r}
+current_na <- VectorScan_Mosquito_Orthogroups[is.na(VectorScan_Mosquito_Orthogroups$`OrthoMCL group id_from_Protein`),]
+```
+
+```{r}
+seqs <- AAStringSet(current_na$'AA Sequence')
+names(seqs) <- paste0(current_na$id)
+
+writeXStringSet(seqs, filepath = "current_na.fasta")
+```
+
+Performed DIAMOND mapping to identify OrthoMCL entries for each protein.
+
+```{r}
+na_DIAMOND <- read_delim("Falciparome_Anopheles_OrthoMCL_DIAMONDMapping.txt")
+```
+
+Map the Orthogroup back to the proteins in VectorScan
+```{r}
+na_DIAMOND$id <- as.numeric(na_DIAMOND$`Query sequence id`)
+
+for(i in 1:nrow(na_DIAMOND)) {
+  query_id <- na_DIAMOND$`Query sequence id`[i]
+  
+  # Use str_detect to find matching descriptions
+  matches <- str_detect(VectorScan_Mosquito_Orthogroups$id, fixed(query_id))
+  
+  # Add columns from the matching OrthoMCL_DIAMOND row to VectorScan_Vector_Orthogroups
+  if(any(matches)) {
+    for(col_name in names(na_DIAMOND)) {
+      if(col_name != "Query sequence id") {
+        new_col_name <- paste0(col_name, "_from_Protein")
+        if(!new_col_name %in% names(VectorScan_Mosquito_Orthogroups)) {
+          VectorScan_Mosquito_Orthogroups[[new_col_name]] <- NA
+        }
+        VectorScan_Mosquito_Orthogroups[matches, new_col_name] <- na_DIAMOND[i, col_name]
+      }
+    }
+  }
+}
+```
+
+```{r}
+VectorScan_Mosquito_Orthogroups <- VectorScan_Mosquito_Orthogroups[VectorScan_Mosquito_Orthogroups$id %in% VectorScan_cleaned$id, ]
+```
+
+```{r}
+sum(VectorScan_Mosquito_Orthogroups$`OrthoMCL group id_from_Protein` == -1)
+sum(VectorScan_Mosquito_Orthogroups$`OrthoMCL group id_from_Protein` != -1)
+nrow(VectorScan_Mosquito_Orthogroups)
+```
+  
+  
+```{r}
+write_xlsx(VectorScan_Mosquito_Orthogroups, 'VectorScan_Mosquito_Orthogroups.xlsx')
+```
