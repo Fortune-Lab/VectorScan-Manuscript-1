@@ -1,0 +1,1482 @@
+CDC Analysis for Revision
+
+Plate 22: TUNE plate 1
+
+Plate 27: TUNE plate 2
+
+```{r}
+# Load relevant libraries 
+library(Biostrings)
+library('dplyr')
+library('corrplot')
+library('writexl')
+library('readxl')
+library('seqinr')
+library(ggplot2)
+library(gridExtra)
+library(ggfortify)
+library(pheatmap)
+library(Biostrings)
+library(tidyverse)
+library(igraph)
+library(RColorBrewer)
+library(reshape2)
+```
+
+```{r}
+setwd('filepath')
+VectorScan <- read_xlsx("VectorScan_Library_1_2.xlsx") ## Or file name of the relevant file that contains the library information
+
+setwd('filepath')
+VectorScan_cleaned <- read_xlsx("VectorScan_cleaned.xlsx")
+```
+
+Bauer Core run Plates 22 and 27
+
+Download the data from the Bauer Core via Globus
+
+cd filepath conda activate cutadapt for fq
+in *R1_001.fastq.gz; do cutadapt -g
+CAGGTGTGATGCTCGGGGATCCAGGAATTCGGAGCGGT -o \${fq%%.*}.cut.fastq.gz \$fq;
+done for fq in *R2_001.fastq.gz; do cutadapt -g
+GCTTATCGTCGTCATCCTTGTAATCGCGGCCGCAAGCTTGTCGAGTGCAGTG -o
+\${fq%%.*}.cut.fastq.gz \$fq; done
+
+On the cluster: conda activate bio-env
+
+align_reads.sh -- #!/bin/bash \# Define a function that processes a pair
+of FASTQ files align_paired_reads() { base=${1%_R1_001.cut.fastq.gz}
+  fq1="${base}\_R1_001.cut.fastq.gz" fq2="${base}_R2_001.cut.fastq.gz"
+  # Run Bowtie2 and redirect standard output and error
+  bowtie2 -x VectorScan_Bowtie --very-sensitive -1 "$fq1" -2
+"$fq2" -S "${base}.sam" 2\>&1 \| tee "\${base}\_bowtie2.log" } \# Export
+the function to be used by parallel export -f align_paired_reads \# Find
+all R1 files and pass them to GNU Parallel parallel align_paired_reads
+::: \*\_R1_001.cut.fastq.gz
+
+cd filepath
+
+chmod +x align_reads.sh ./align_reads.sh
+
+On the cluster: parallel ' samtools view -bS {} \| samtools view -b -f
+0x2 \| samtools sort -o {=s/.sam$/.concordant.sorted.bam/=} - &&
+  samtools index {=s/\.sam$/.concordant.sorted.bam/=} && samtools
+idxstats {=s/.sam$/.concordant.sorted.bam/=} |
+    cut -f 1,3 |
+    sed -e "/^\*\t/d" -e "1 i id\t${{=s/.sam$//=}}" |
+    tr "\\t" "," > {=s/\.sam$/.count.csv/=} ' ::: \*.sam
+
+paste -d ',' \*.count.csv \>2025_10_17_Plates22and27_counts.csv
+
+cd 'filepath'
+
+```{r}
+AllCounts <- read.csv('filepath/2025_10_17_Plates22and27_counts.csv') 
+
+cols_to_remove <- grepl("id", names(AllCounts))
+AllCounts <- AllCounts[, !cols_to_remove]
+
+colnames(AllCounts) <- c('P22_PBS','P22_TUNE-24','P22_TUNE-52','P22_TUNE-32','P22_TUNE-26','P22_PBS','P22_TUNE-40','P22_TUNE-25','P22_TUNE-37','P22_TUNE-27','P22_TUNE-45','P22_TUNE-33','P22_TUNE-46','P22_TUNE-29','P22_TUNE-38','P22_TUNE-42','P22_TUNE-49','P22_TUNE-69','P22_TUNE-30','P22_TUNE-35','P22_TUNE-39','P22_TUNE-34','P22_TUNE-28','P22_TUNE-36','P22_PBS','P22_TUNE-73','P22_TUNE-51','P22_TUNE-27','P22_TUNE-74','P22_PBS','P22_TUNE-43','P22_TUNE-72','P22_TUNE-26','P22_TUNE-48','P22_TUNE-41','P22_TUNE-31','P22_TUNE-68','P22_TUNE-33','P22_TUNE-39','P22_TUNE-70','P22_TUNE-44','P22_TUNE-47','P22_TUNE-50','P22_TUNE-31','P22_TUNE-48','P22_TUNE-50','P22_TUNE-36','P22_TUNE-34','P22_PBS','P22_TUNE-76','P22_TUNE-29','P22_TUNE-75','P22_TUNE-32','P22_TUNE-71','P22_TUNE-46','P22_TUNE-77','P22_TUNE-25','P22_TUNE-75','P22_TUNE-43','P22_TUNE-24','P22_TUNE-77','P22_TUNE-35','P22_TUNE-52','P22_TUNE-40','P22_PBS','P22_TUNE-38','P22_TUNE-71','P22_TUNE-47','P22_TUNE-51','P22_TUNE-76','P22_TUNE-78','P22_TUNE-68','P22_PBS','P22_TUNE-73','P22_TUNE-45','P22_TUNE-42','P22_TUNE-44','P22_TUNE-69','P22_TUNE-74','P22_TUNE-30','P22_TUNE-72','P22_TUNE-37','P22_TUNE-78','P22_PBS','P22_TUNE-49','P22_TUNE-28','P22_TUNE-70','P22_TUNE-41','P27_TUNE-16','P27_TUNE-69','P27_TUNE-73','P27_TUNE-74','P27_TUNE-15','P27_TUNE-20','P27_TUNE-23','P27_PBS','P27_TUNE-14','P27_TUNE-10','P27_TUNE-11','P27_TUNE-30','P27_TUNE-32','P27_TUNE-23','P27_TUNE-17','P27_TUNE-11','P27_TUNE-75','P27_TUNE-7','P27_TUNE-68','P27_TUNE-69','P27_PBS','P27_TUNE-5','P27_TUNE-3','P27_TUNE-74','P27_TUNE-18','P27_TUNE-7','P27_TUNE-18','P27_PBS','P27_TUNE-14','P27_TUNE-78','P27_TUNE-9','P27_TUNE-77','P27_TUNE-73','P27_TUNE-70','P27_TUNE-21','P27_TUNE-78','P27_TUNE-35','P27_TUNE-76','P27_TUNE-5','P27_TUNE-30','P27_PBS','P27_TUNE-3','P27_TUNE-36','P27_TUNE-4','P27_TUNE-15','P27_TUNE-19','P27_TUNE-8','P27_PBS','P27_TUNE-76','P27_TUNE-37','P27_TUNE-72','P27_TUNE-13','P27_TUNE-6','P27_TUNE-22','P27_TUNE-2','P27_TUNE-70','P27_TUNE-13','P27_TUNE-1','P27_TUNE-22','P27_TUNE-71','P27_PBS','P27_TUNE-4','P27_TUNE-2','P27_TUNE-36','P27_TUNE-17','P27_TUNE-16','P27_TUNE-6','P27_PBS','P27_TUNE-12','P27_TUNE-37','P27_TUNE-79','P27_TUNE-12','P27_TUNE-72','P27_TUNE-77','P27_TUNE-79','P27_TUNE-1','P27_TUNE-35','P27_TUNE-20','P27_TUNE-21','P27_TUNE-68','P27_PBS','P27_TUNE-9','P27_TUNE-8','P27_TUNE-32','P27_TUNE-75','P27_TUNE-19','P27_TUNE-10','P27_TUNE-71')
+
+colnames(AllCounts) <- make.unique(colnames(AllCounts))
+
+AllCounts <- AllCounts[, order(names(AllCounts))]
+
+cor_matrix <- cor(AllCounts,AllCounts, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+Plate 22 - TUNE-49 has poor concordance between replicates --> remove 
+Plate 27 - TUNE-8 has poor concordance between replicates --> remove 
+
+```{r}
+cols_to_remove <- grepl("TUNE-49", names(AllCounts))
+AllCounts <- AllCounts[, !cols_to_remove]
+
+cols_to_remove <- grepl("TUNE-8", names(AllCounts))
+AllCounts <- AllCounts[, !cols_to_remove]
+
+cor_matrix <- cor(AllCounts,AllCounts, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+```{r}
+# Make the correlation matrix for Plate 22 only 
+cols_to_keep <- grepl("P22", names(AllCounts))
+temp <- AllCounts[, cols_to_keep]
+cor_matrix <- cor(temp,temp, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+```{r}
+# Make the correlation matrix for Plate 27 only 
+cols_to_keep <- grepl("P27", names(AllCounts))
+temp <- AllCounts[, cols_to_keep]
+cor_matrix <- cor(temp,temp, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+```{r}
+# Define seroreactivity for peptides in the Plate 22 samples 
+
+selected_Plate22_columns <- grep("P22_", names(AllCounts), value = TRUE)
+Plate22_counts <- AllCounts[, selected_Plate22_columns]
+
+selected_PBS_columns <- grep("PBS", names(Plate22_counts), value = TRUE)
+Plate22_counts_PBS <- Plate22_counts[, selected_PBS_columns]
+
+Plate22_PBS_RPK <- sweep(Plate22_counts_PBS, 2, colSums(Plate22_counts_PBS), FUN = "/") * 1e5
+Plate22_PBS_RPK$mean <-  apply(Plate22_PBS_RPK, 1, mean) 
+Plate22_PBS_RPK$stdev <-  apply(Plate22_PBS_RPK, 1, sd) 
+Plate22_PBS_RPK$LOD <- Plate22_PBS_RPK$mean + 5*Plate22_PBS_RPK$stdev
+
+identifiers <- paste0("P22_",unique(str_extract(names(Plate22_counts), "TUNE-\\d+")))
+identifiers <- identifiers[identifiers != "P22_NA"]
+
+Plate22_VectorScan_All_results_list <- list()
+Plate22_VectorScan_Discordance_results_list <-  list()
+Plate22_VectorScan_ConcordantPeptides_results_list <- list()
+Plate22_VectorScan_Seroreactive_results_list <- list()
+
+# Loop over each identifier
+for (identifier in identifiers) {
+  Rep1_col <- paste0(identifier) 
+  Rep2_col <- paste0(identifier, ".1") 
+  
+  selected_PBS_columns <- grep("PBS", names(Plate22_counts), value = TRUE)
+  
+  selected_sample_columns <- c(Rep1_col, Rep2_col, selected_PBS_columns) 
+
+  Pt <- Plate22_counts[, selected_sample_columns]
+  
+  Pt$id <- VectorScan$id
+  
+  Pt$PBS_LOD <- Plate22_PBS_RPK$LOD
+  
+  # Get the RPK for each replicate 
+  Pt$Rep1_RPK <- Pt[[Rep1_col]]/sum(Pt[[Rep1_col]])*1e5
+  Pt$Rep2_RPK <- Pt[[Rep2_col]]/sum(Pt[[Rep2_col]])*1e5
+  
+  Pt <- inner_join(Pt, VectorScan, by = 'id')
+    
+  Pt$ForAlignment <- paste0(">", Pt$id, "_", Pt$Species, " ", Pt$`AA Sequence`)
+
+  # To be seroreactive, both replicates from that sample need to be above the noise threshold 
+  # Also enforcing a count limit, where the peptide needs a count >= 5
+  
+  rep1_high <- (Pt$Rep1_RPK > Pt$PBS_LOD) &  (Pt[[Rep1_col]] >= 5)
+  rep2_high <- (Pt$Rep2_RPK > Pt$PBS_LOD)  &  (Pt[[Rep2_col]] >= 5)
+
+  Pt$Seropositive <- ifelse(rep1_high == 1 & rep2_high == 1, 1, 0)
+  
+  # If the peptide is seronegative, want to determine if it's because the replicates are inconsistent (pos/neg v. neg/pos, vs. both negative)
+  Pt$Discordant <- ifelse(Pt$Seropositive == 0 & (rep1_high != rep2_high), 1, 0)
+
+  discordance_temp <- sum(Pt$Discordant)
+  
+  Plate22_VectorScan_Discordance_results_list[[identifier]] <- discordance_temp
+ 
+  Plate22_VectorScan_All_results_list[[identifier]] <- Pt
+  
+  # Limit the peptides to the ones in the library that do not have long GS linkers and have representation in the original library
+  # The number of peptides in this cleaned library (VectorScan_cleaned) should be the denominator for all future Fishers tests
+  
+  Pt <- inner_join(Pt, VectorScan_cleaned, by = 'id')
+  
+  # Want to limit the pool of peptides to ones that are concordant at both timepoints 
+  
+  Pt <- Pt[as.logical(Pt$Discordant == 0),]
+  
+  Pt$Average <- (Pt$Rep1_RPK + Pt$Rep2_RPK)/2
+  
+  Pt$Seropositive_Average <- Pt$Average * Pt$Seropositive
+    
+  Plate22_VectorScan_ConcordantPeptides_results_list[[identifier]] <- Pt
+  
+  Pt <- Pt[as.logical(Pt$Seropositive == 1),]
+  
+  Plate22_VectorScan_Seroreactive_results_list[[identifier]] <- Pt
+  
+}
+```
+
+```{r}
+# Define seroreactivity for peptides in the Plate 27 samples 
+
+selected_Plate27_columns <- grep("P27_", names(AllCounts), value = TRUE)
+Plate27_counts <- AllCounts[, selected_Plate27_columns]
+
+selected_PBS_columns <- grep("PBS", names(Plate27_counts), value = TRUE)
+Plate27_counts_PBS <- Plate27_counts[, selected_PBS_columns]
+
+Plate27_PBS_RPK <- sweep(Plate27_counts_PBS, 2, colSums(Plate27_counts_PBS), FUN = "/") * 1e5
+Plate27_PBS_RPK$mean <-  apply(Plate27_PBS_RPK, 1, mean) 
+Plate27_PBS_RPK$stdev <-  apply(Plate27_PBS_RPK, 1, sd) 
+Plate27_PBS_RPK$LOD <- Plate27_PBS_RPK$mean + 5*Plate27_PBS_RPK$stdev
+
+identifiers <- paste0("P27_",unique(str_extract(names(Plate27_counts), "TUNE-\\d+")))
+identifiers <- identifiers[identifiers != "P27_NA"]
+
+Plate27_VectorScan_All_results_list <- list()
+Plate27_VectorScan_Discordance_results_list <-  list()
+Plate27_VectorScan_ConcordantPeptides_results_list <- list()
+Plate27_VectorScan_Seroreactive_results_list <- list()
+
+# Loop over each identifier
+for (identifier in identifiers) {
+  Rep1_col <- paste0(identifier) 
+  Rep2_col <- paste0(identifier, ".1") 
+  
+  selected_PBS_columns <- grep("PBS", names(Plate27_counts), value = TRUE)
+  
+  selected_sample_columns <- c(Rep1_col, Rep2_col, selected_PBS_columns) 
+
+  Pt <- Plate27_counts[, selected_sample_columns]
+  
+  Pt$id <- VectorScan$id
+  
+  Pt$PBS_LOD <- Plate27_PBS_RPK$LOD
+  
+  # Get the RPK for each replicate 
+  Pt$Rep1_RPK <- Pt[[Rep1_col]]/sum(Pt[[Rep1_col]])*1e5
+  Pt$Rep2_RPK <- Pt[[Rep2_col]]/sum(Pt[[Rep2_col]])*1e5
+  
+  Pt <- inner_join(Pt, VectorScan, by = 'id')
+    
+  Pt$ForAlignment <- paste0(">", Pt$id, "_", Pt$Species, " ", Pt$`AA Sequence`)
+
+  # To be seroreactive, both replicates from that sample need to be above the noise threshold 
+  # Also enforcing a count limit, where the peptide needs a count >= 5
+  
+  rep1_high <- (Pt$Rep1_RPK > Pt$PBS_LOD) &  (Pt[[Rep1_col]] >= 5)
+  rep2_high <-  (Pt$Rep2_RPK > Pt$PBS_LOD)  &  (Pt[[Rep2_col]] >= 5)
+  
+  Pt$Seropositive <- ifelse(rep1_high == 1 & rep2_high == 1, 1, 0)
+  
+  # If the peptide is seronegative, want to determine if it's because the replicates are inconsistent (pos/neg v. neg/pos, vs. both negative)
+  Pt$Discordant <- ifelse(Pt$Seropositive == 0 & (rep1_high != rep2_high), 1, 0)
+
+  discordance_temp <-  sum(Pt$Discordant)
+  
+  Plate27_VectorScan_Discordance_results_list[[identifier]] <- discordance_temp
+ 
+  Plate27_VectorScan_All_results_list[[identifier]] <- Pt
+  
+  # Limit the peptides to the ones in the library that do not have long GS linkers and have representation in the original library
+  # The number of peptides in this cleaned library (VectorScan_cleaned) should be the denominator for all future Fishers tests
+  
+  Pt <- inner_join(Pt, VectorScan_cleaned, by = 'id')
+  
+  # Want to limit the pool of peptides to ones that are concordant at both timepoints 
+  
+  Pt <- Pt[as.logical(Pt$Discordant == 0),]
+  
+  Pt$Average <- (Pt$Rep1_RPK + Pt$Rep2_RPK)/2
+  
+  Pt$Seropositive_Average <- Pt$Average * Pt$Seropositive
+    
+  Plate27_VectorScan_ConcordantPeptides_results_list[[identifier]] <- Pt
+  
+  Pt <- Pt[as.logical(Pt$Seropositive == 1),]
+  
+  Plate27_VectorScan_Seroreactive_results_list[[identifier]] <- Pt
+  
+}
+```
+
+```{r} 
+# Combining the lists into single dataframes with the data from each sample that can be used to do all the downstream analyses
+# Peptides that are seronegative in a sample have values artificially set to 0
+
+Plate22_Seropositive_RPKs <- Plate22_VectorScan_ConcordantPeptides_results_list %>%
+  map(~ dplyr::select(.x, id, Seropositive_Average)) %>% 
+      bind_rows(.id = "Sample") %>%
+          pivot_wider(
+            names_from = Sample, 
+            values_from = Seropositive_Average, 
+            values_fill = 0  
+          )
+
+Plate22_Seropositive_RPKs <- Plate22_Seropositive_RPKs %>% relocate(id, .after = last_col())
+
+Plate22_Seropositive_Binary <- Plate22_VectorScan_ConcordantPeptides_results_list %>%
+    map(~ dplyr::select(.x, id, Seropositive)) %>% 
+      bind_rows(.id = "Sample") %>%
+          pivot_wider(
+            names_from = Sample, 
+            values_from = Seropositive, 
+            values_fill = 0  
+          )
+
+Plate22_Seropositive_Binary <- Plate22_Seropositive_Binary %>% relocate(id, .after = last_col())
+
+Plate27_Seropositive_RPKs <- Plate27_VectorScan_ConcordantPeptides_results_list %>%
+  map(~ dplyr::select(.x, id, Seropositive_Average)) %>% 
+      bind_rows(.id = "Sample") %>%
+          pivot_wider(
+            names_from = Sample, 
+            values_from = Seropositive_Average, 
+            values_fill = 0  
+          )
+
+Plate27_Seropositive_RPKs <- Plate27_Seropositive_RPKs %>% relocate(id, .after = last_col())
+
+Plate27_Seropositive_Binary <- Plate27_VectorScan_ConcordantPeptides_results_list %>%
+    map(~ dplyr::select(.x, id, Seropositive)) %>% 
+      bind_rows(.id = "Sample") %>%
+          pivot_wider(
+            names_from = Sample, 
+            values_from = Seropositive, 
+            values_fill = 0  
+          )
+
+Plate27_Seropositive_Binary <- Plate27_Seropositive_Binary %>% relocate(id, .after = last_col())
+
+Plates22and27_RPKs <- inner_join(Plate22_Seropositive_RPKs, Plate27_Seropositive_RPKs, by = 'id')
+
+Plates22and27_RPKs <- Plates22and27_RPKs %>% relocate(id, .after = last_col())
+
+Plates22and27_RPKs <- inner_join(Plates22and27_RPKs, VectorScan, by = 'id')
+
+Plates22and27_Binary <- inner_join(Plate22_Seropositive_Binary, Plate27_Seropositive_Binary, by = 'id')
+
+Plates22and27_Binary <- Plates22and27_Binary %>% relocate(id, .after = last_col())
+
+Plates22and27_Binary <- inner_join(Plates22and27_Binary, VectorScan, by = 'id')
+```
+
+```{r}
+# Manual checks of technical reproducibility after all this normalization
+
+# Making sure that there is concordance between the actual quantitative RPK values when the same sample is run on different plates 
+temp1 <- data.frame('P22_TUNE-32' = Plates22and27_RPKs$`P22_TUNE-32`, 'P27_TUNE-32' = Plates22and27_RPKs$`P27_TUNE-32`)
+temp1 <- temp1[as.logical(rowSums(temp1)>0),]
+plot(temp1[,1], temp1[,2])
+
+# Making sure that there is concordance between the actual quantitative RPK values when the same sample is run on different plates 
+temp1 <- data.frame('P22_TUNE-36' = Plates22and27_RPKs$`P22_TUNE-36`, 'P27_TUNE-36' = Plates22and27_RPKs$`P27_TUNE-36`)
+temp1 <- temp1[as.logical(rowSums(temp1)>0),]
+plot(temp1[,1], temp1[,2])
+
+# Making sure that there is concordance between the actual quantitative RPK values when the same sample is run on different plates 
+temp1 <- data.frame('P22_TUNE-68' = Plates22and27_RPKs$`P22_TUNE-68`, 'P27_TUNE-68' = Plates22and27_RPKs$`P27_TUNE-68`)
+temp1 <- temp1[as.logical(rowSums(temp1)>0),]
+plot(temp1[,1], temp1[,2])
+
+# Making sure that there is concordance between the actual quantitative RPK values when the same sample is run on different plates 
+temp1 <- data.frame('P22_TUNE-69' = Plates22and27_RPKs$`P22_TUNE-69`, 'P27_TUNE-69' = Plates22and27_RPKs$`P27_TUNE-69`)
+temp1 <- temp1[as.logical(rowSums(temp1)>0),]
+plot(temp1[,1], temp1[,2])
+
+# Making sure that there is concordance between the actual quantitative RPK values when the same sample is run on different plates 
+temp1 <- data.frame('P22_TUNE-70' = Plates22and27_RPKs$`P22_TUNE-70`, 'P27_TUNE-70' = Plates22and27_RPKs$`P27_TUNE-70`)
+temp1 <- temp1[as.logical(rowSums(temp1)>0),]
+plot(temp1[,1], temp1[,2])
+
+# Making sure that there is concordance between the actual quantitative RPK values when the same sample is run on different plates 
+temp1 <- data.frame('P22_TUNE-30' = Plates22and27_RPKs$`P22_TUNE-30`, 'P27_TUNE-30' = Plates22and27_RPKs$`P27_TUNE-30`)
+temp1 <- temp1[as.logical(rowSums(temp1)>0),]
+plot(temp1[,1], temp1[,2])
+
+# Making sure that there is concordance between the actual quantitative RPK values when the same sample is run on different plates 
+temp1 <- data.frame('P22_TUNE-75' = Plates22and27_RPKs$`P22_TUNE-75`, 'P27_TUNE-75' = Plates22and27_RPKs$`P27_TUNE-75`)
+temp1 <- temp1[as.logical(rowSums(temp1)>0),]
+plot(temp1[,1], temp1[,2])
+```
+
+```{r}
+# Make the correlation matrix to see if the samples have consistent peptide-wise signal across plates 
+# The samples that were run on both plates should have high correlation 
+
+temp <- Plates22and27_RPKs[, 1:78]
+temp <- temp[as.logical(rowSums(temp) >0),]
+cor_matrix <- cor(temp,temp, method = "spearman")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+```{r}
+# Average the RPKs for the samples that were run on both plates 
+
+# Looking at all signal
+Plates22and27_Combined <- Plates22and27_RPKs
+Plates22and27_Combined$sum <- rowSums(Plates22and27_Combined[,1:78])
+
+heatmap_data <- Plates22and27_Combined
+
+# Average the RPKs for the samples that were run on both plates 
+df <- Plates22and27_Combined[,1:78]
+
+cols <- colnames(df)
+
+tune_id <- sub(".*(TUNE\\-\\d+)$", "\\1", cols)
+unique_ids <- unique(tune_id)
+
+result <- data.frame(row_index = seq_len(nrow(df)))
+
+for(id in unique_ids) {
+  
+  group_cols <- df[, tune_id == id, drop = FALSE]
+  
+  if (ncol(group_cols) == 1) {
+    
+    original_name <- colnames(group_cols)[1]
+    result[[original_name]] <- group_cols[, 1]
+  
+  } else {
+    
+    averaged <- rowMeans(group_cols, na.rm = TRUE)
+    newname <- paste0("P22and27_", id)
+    result[[newname]] <- as.numeric(averaged)
+  }
+}
+
+result$row_index <- NULL
+
+result$id <- Plates22and27_Combined$id
+
+Plates22and27_Combined <- result
+
+Plates22and27_Combined <- inner_join(Plates22and27_Combined, VectorScan, by = 'id')
+
+```
+
+```{r}
+# Can't save because some of the columns are tibbles
+# to fix that: 
+
+Plates22and27_Combined_df <- Plates22and27_Combined
+
+is_df_col <- vapply(Plates22and27_Combined_df, is.data.frame, logical(1))
+for (nm in names(Plates22and27_Combined_df)[is_df_col]) {
+  Plates22and27_Combined_df[[nm]] <- Plates22and27_Combined_df[[nm]][[1]]
+}
+
+write_xlsx(Plates22and27_Combined_df, "Plates22and27_Combined_df.xlsx")
+```
+
+```{r}
+Plates22and27_Combined <- read_xlsx('Plates22and27_Combined_df.xlsx')
+```
+
+
+```{r}
+# To look at the seroprevalence of a particular peptide across all 62 samples 
+
+peptide <- "245872"
+temp <- Plates22and27_Combined[as.logical(Plates22and27_Combined$id == peptide),]
+sum(temp[,1:62]>0)/62*100
+```
+
+```{r}
+Plate22_metadata <- data.frame(Plate = c(rep('22', 39)), 
+  Subject = c('TUNE-24','TUNE-25','TUNE-26','TUNE-27','TUNE-28','TUNE-29','TUNE-30','TUNE-31','TUNE-32','TUNE-33','TUNE-34','TUNE-35','TUNE-36','TUNE-37','TUNE-38','TUNE-39','TUNE-40','TUNE-41','TUNE-42','TUNE-43','TUNE-44','TUNE-45','TUNE-46','TUNE-47','TUNE-48','TUNE-50','TUNE-51','TUNE-52','TUNE-68','TUNE-69','TUNE-70','TUNE-71','TUNE-72','TUNE-73','TUNE-74','TUNE-75','TUNE-76','TUNE-77','TUNE-78'),
+  Recent_Illness = c(rep('No', 39)),
+  DENV_IgG = c('pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg'), 
+  CHIKV_IgG = c('pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg'),
+  DENV_IgM = c('not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','neg','neg','neg','neg','neg','not tested','not tested','not tested','not tested','not tested'), 
+  CHIKV_IgM = c(rep('neg', 39)))
+
+Plate27_metadata <- data.frame(Plate = c(rep('27', 39)), 
+  Subject = c('TUNE-1','TUNE-10','TUNE-11','TUNE-12','TUNE-13','TUNE-14','TUNE-15','TUNE-16','TUNE-17','TUNE-18','TUNE-19','TUNE-2','TUNE-20','TUNE-21','TUNE-22','TUNE-23','TUNE-3','TUNE-30','TUNE-32','TUNE-35','TUNE-36','TUNE-37','TUNE-4','TUNE-5','TUNE-6','TUNE-68','TUNE-69','TUNE-7','TUNE-70','TUNE-71','TUNE-72','TUNE-73','TUNE-74','TUNE-75','TUNE-76','TUNE-77','TUNE-78','TUNE-79','TUNE-9'),
+  Recent_Illness = c('No','Yes','Yes','Yes','Yes','Yes','Yes','Yes','Yes','Yes','Yes','No','Yes','Yes','Yes','Yes','No','No','No','No','No','No','No','Yes','Yes','No','No','Yes','No','No','No','No','No','No','No','No','No','No','Yes'),
+  DENV_IgG = c('neg','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','neg','not tested','not tested','not tested','not tested','neg','pos','pos','pos','pos','pos','neg','not tested','not tested','neg','neg','not tested','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','not tested'), 
+  CHIKV_IgG = c('pos','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','not tested','pos','not tested','not tested','not tested','not tested','pos','pos','pos','pos','pos','pos','pos','not tested','not tested','neg','neg','not tested','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','not tested'),
+  DENV_IgM = c('not tested','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','not tested','neg','neg','neg','neg','not tested','not tested','not tested','not tested','not tested','not tested','not tested','neg','neg','not tested','neg','neg','neg','neg','neg','neg','not tested','not tested','not tested','not tested','not tested','not tested','neg'), 
+  CHIKV_IgM = c('neg','pos','pos','pos','pos','pos','pos','pos','pos','pos','pos','neg','pos','pos','pos','pos','neg','neg','neg','neg','neg','neg','pos','pos','pos','neg','neg','pos','neg','neg','neg','neg','neg','neg','neg','neg','neg','neg','pos'))
+
+# The TUNE-1 CHIKV IgM result was "eqv", so it is treated as negative since it is not positive but was tested 
+
+# Joining all the metadata from the two plates together, and then fixing the resulting naming issues since the same column names are used in both dataframes 
+
+Plates22and27_metadata <- full_join(Plate22_metadata, Plate27_metadata, by = "Subject")
+
+Plates22and27_metadata <- Plates22and27_metadata %>%
+  mutate(
+    DENV_IgG = coalesce(DENV_IgG.x, DENV_IgG.y),
+    CHIKV_IgG = coalesce(CHIKV_IgG.x, CHIKV_IgG.y),
+    DENV_IgM = coalesce(DENV_IgM.x, DENV_IgM.y),
+    CHIKV_IgM = coalesce(CHIKV_IgM.x, CHIKV_IgM.y),
+    Recent_Illness = coalesce(Recent_Illness.x, Recent_Illness.y),
+    Plate = coalesce(Plate.x, Plate.y)
+  )
+
+Plates22and27_metadata$Exposed <- (Plates22and27_metadata$CHIKV_IgG == "pos" | Plates22and27_metadata$DENV_IgG == "pos")
+```
+
+```{r}
+# Measure CHIKV breadth 
+temp <- Plates22and27_Combined[as.logical(Plates22and27_Combined$Species == "CV"),]
+temp <- temp[,1:62]
+counts_of_interest <- data.frame(
+  column = names(temp),
+  n_counts  = colSums(temp > 0, na.rm = TRUE))
+counts_of_interest <- cbind(counts_of_interest, Plates22and27_metadata)
+```
+
+```{r}
+# Measure DENV breadth 
+temp <- Plates22and27_Combined[as.logical(Plates22and27_Combined$Species == "DV"),]
+temp <- temp[,1:62]
+counts_of_interest <- data.frame(
+  column = names(temp),
+  n_counts  = colSums(temp > 0, na.rm = TRUE))
+counts_of_interest <- cbind(counts_of_interest, Plates22and27_metadata)
+```
+
+CHIKV IgG+ v IgG- analysis 
+
+```{r}
+# Species-wise Mann-Whitney tests for comparing CHIKV IgG+ v IgG-
+
+temp <- Plates22and27_Combined[,1:62]
+temp <- data.frame(t(temp))
+colnames(temp) <- Plates22and27_Combined$id
+
+# Only analyze signal from peptides that are seroreactive in at least 1 of the samples
+temp <- temp[,as.logical(colSums(temp)>0)]
+temp$CHIKV_IgG <- Plates22and27_metadata$CHIKV_IgG
+
+temp_CHIKV_IgG_Pos <- temp[as.logical(temp$CHIKV_IgG == "pos"),]
+
+CHIKV_IgG_means <- data.frame(Pos_Means = colMeans(temp_CHIKV_IgG_Pos[,1:(ncol(temp_CHIKV_IgG_Pos)-1)]))
+
+temp_CHIKV_IgG_Neg <- temp[as.logical(temp$CHIKV_IgG == "neg"),]
+
+CHIKV_IgG_means$Neg_means <- colMeans(temp_CHIKV_IgG_Neg[,1:(ncol(temp_CHIKV_IgG_Neg)-1)])
+
+CHIKV_IgG_means$Diff <- log2((CHIKV_IgG_means$Pos_Means+0.1)/(CHIKV_IgG_means$Neg_means+0.1))
+
+CHIKV_IgG_means <- CHIKV_IgG_means %>% arrange(-CHIKV_IgG_means$Diff)
+
+CHIKV_IgG_means$rank <- seq(1, nrow(CHIKV_IgG_means))
+CHIKV_IgG_means$id <- as.numeric(rownames(CHIKV_IgG_means))
+CHIKV_IgG_means$Species <- VectorScan_cleaned$Species[match(CHIKV_IgG_means$id,VectorScan_cleaned$id)]
+
+df <- CHIKV_IgG_means
+
+# All relevant species 
+species_vec <- unique(df$Species)
+
+mw_results <- map_df(species_vec, function(sp) {
+  
+  # Label the peptides that are from the species that's being analyzed 
+  df$flag <- (df$Species == sp)
+  
+  # Only run the Mann-Whitney analysis if there are more than 2 peptides, otherwise there's not a distribution to compare
+  if (length(unique(df$flag)) < 2) {
+    return(data.frame(
+      Species   = sp,
+      W         = NA_real_,
+      p_value   = NA_real_
+    ))
+  }
+  
+  # Run the Mann-Whitney test 
+  test_res <- wilcox.test(
+    Diff ~ flag,
+    data = df,
+    alternative = "less"
+  )
+  
+  # Results from the test 
+  data.frame(
+    Species = sp,
+    W       = unname(test_res$statistic),
+    p_value = test_res$p.value
+  )
+})
+
+# Benjamini-Hochberg p-value adjustment 
+mw_results$padj <- p.adjust(mw_results$p_value, method = "BH")
+
+mw_results$log10adjusted <- -log10(mw_results$padj)
+
+CHIKV_IgG_mw_results_Species <- mw_results
+
+# Want to make the plot for CHIKV, specifically 
+
+df$flag <- (df$Species == "CV" )
+
+# Mann–Whitney test
+mw_res <- wilcox.test(Diff ~ flag,
+                      data = df, 
+                      alternative = "less")  
+
+# Print the p-value from this directed test 
+mw_res$p.value
+
+pval_lab <- paste0("Mann–Whitney p = ", signif(mw_res$p.value, 3))
+
+ggplot(df, aes(x = rank, y = Diff)) +
+  geom_jitter(
+    data  = subset(df, flag == FALSE),
+    color = "gray60",
+    alpha = 0.1,
+    size  = 1.5,
+    height = 0.1
+  ) +
+  geom_jitter(
+    data  = subset(df, flag == TRUE),
+    color = "purple",
+    alpha = 0.2,
+    size  = 1.5,
+    height = 0.1
+  ) +
+  labs(
+    title = "Difference in signal between CHIKV IgG+/-",
+    y = "Fold change difference",
+    x = "Rank"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+# Species-wise Mann-Whitney tests for comparing DENV IgG+ v IgG-
+
+temp <- Plates22and27_Combined[,1:62]
+temp <- data.frame(t(temp))
+colnames(temp) <- Plates22and27_Combined$id
+
+# Only analyze signal from peptides that are seroreactive in at least 1 of the samples
+temp <- temp[,as.logical(colSums(temp)>0)]
+temp$DENV_IgG <- Plates22and27_metadata$DENV_IgG
+
+temp_DENV_IgG_Pos <- temp[as.logical(temp$DENV_IgG == "pos"),]
+
+DENV_IgG_means <- data.frame(Pos_Means = colMeans(temp_DENV_IgG_Pos[,1:(ncol(temp_DENV_IgG_Pos)-1)]))
+
+temp_DENV_IgG_Neg <- temp[as.logical(temp$DENV_IgG == "neg"),]
+
+DENV_IgG_means$Neg_means <- colMeans(temp_DENV_IgG_Neg[,1:(ncol(temp_DENV_IgG_Neg)-1)])
+
+DENV_IgG_means$Diff <- log2((DENV_IgG_means$Pos_Means+0.1)/(DENV_IgG_means$Neg_means+0.1))
+
+DENV_IgG_means <- DENV_IgG_means %>% arrange(-DENV_IgG_means$Diff)
+
+DENV_IgG_means$rank <- seq(1, nrow(DENV_IgG_means))
+DENV_IgG_means$id <- as.numeric(rownames(DENV_IgG_means))
+DENV_IgG_means$Species <- VectorScan_cleaned$Species[match(DENV_IgG_means$id,VectorScan_cleaned$id)]
+
+df <- DENV_IgG_means
+
+# All relevant species 
+species_vec <- unique(df$Species)
+
+mw_results <- map_df(species_vec, function(sp) {
+  
+  # Label the peptides that are from the species that's being analyzed 
+  df$flag <- (df$Species == sp)
+  
+  # Only run the Mann-Whitney analysis if there are more than 2 peptides, otherwise there's not a distribution to compare
+  if (length(unique(df$flag)) < 2) {
+    return(data.frame(
+      Species   = sp,
+      W         = NA_real_,
+      p_value   = NA_real_
+    ))
+  }
+  
+  # Run the Mann-Whitney test 
+  test_res <- wilcox.test(
+    Diff ~ flag,
+    data = df,
+    alternative = "less"
+  )
+  
+  # Results from the test 
+  data.frame(
+    Species = sp,
+    W       = unname(test_res$statistic),
+    p_value = test_res$p.value
+  )
+})
+
+# Benjamini-Hochberg p-value adjustment 
+mw_results$padj <- p.adjust(mw_results$p_value, method = "BH")
+
+mw_results$log10adjusted <- -log10(mw_results$padj)
+
+DENV_IgG_mw_results_Species <- mw_results
+
+# Want to make the plot for DENV, specifically 
+
+df$flag <- (df$Species == "DV" )
+
+# Mann–Whitney test
+mw_res <- wilcox.test(Diff ~ flag,
+                      data = df, 
+                      alternative = "less")  
+
+# Print the p-value from this directed test 
+mw_res$p.value
+
+pval_lab <- paste0("Mann–Whitney p = ", signif(mw_res$p.value, 3))
+
+ggplot(df, aes(x = rank, y = Diff)) +
+  geom_jitter(
+    data  = subset(df, flag == FALSE),
+    color = "gray60",
+    alpha = 0.1,
+    size  = 1.5,
+    height = 0.1
+  ) +
+  geom_jitter(
+    data  = subset(df, flag == TRUE),
+    color = "#7f2421",
+    alpha = 0.2,
+    size  = 1.5,
+    height = 0.1
+  ) +
+  labs(
+    title = "Difference in signal between DENV IgG+/-",
+    y = "Fold change difference",
+    x = "Rank"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+# Find all the CHIKV peptides that are seroreactive in any of the samples 
+temp <- Plates22and27_Combined
+temp <- temp[as.logical(temp$Species == "CV"),]
+temp <- temp[as.logical(rowSums(temp[,1:62])>0),]
+temp_ids <- temp$id 
+
+CHIKV_peptides_of_interest <- data.frame(id = temp_ids)
+CHIKV_peptides_of_interest <- inner_join(CHIKV_peptides_of_interest, VectorScan, by = 'id')
+
+setwd('filepath')
+
+# Create an AAStringSet object
+seqs <- AAStringSet(CHIKV_peptides_of_interest$'AA Sequence')
+  # Add names from the sequence header column
+names(seqs) <- paste0(CHIKV_peptides_of_interest$id)
+writeXStringSet(seqs, filepath = "CHIKV_peptides_of_interest.faa")
+
+```
+
+The commands used to run the blastp search: 
+
+cd 'filepath' 
+
+makeblastdb -in CHIKV_peptides_of_interest.faa -out db -parse_seqids -dbtype prot 
+blastp -query CHIKV_peptides_of_interest.faa -db db -outfmt 6 -max_hsps 1 -out CHIKV_peptides_of_interest.txt 
+
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' CHIKV_peptides_of_interest.txt > CHIKV_peptides_of_interest.csv
+
+
+```{r}
+setwd('filepath')
+
+# Get rid of  priors to make sure that the clustering is clean
+rm(membership_df)
+rm(membership_vector)
+rm(edge_list)
+rm(g)
+rm(CHIKV_relevant_clusters)
+rm(Plates22and27_CHIKV_cluster_sums)
+
+# Cluster the peptides that come out of the blastp analysis 
+Subject_BLAST <- read.csv('CHIKV_peptides_of_interest.csv', header = FALSE)
+Subject_BLAST <- Subject_BLAST[as.logical(Subject_BLAST$V12 >= 40), ]
+
+edge_list <- Subject_BLAST[, c("V1", "V2")]
+g <- graph_from_data_frame(d = edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
+
+# Do the Louvain clustering
+set.seed(123)  # Makes the results reproducible for the sake of reproducing the findings in the paper, since sometimes the clustering can change by 1-2 clusters, which offsets the Cluster IDs 
+
+clusters <- cluster_louvain(g)
+membership_vector <- membership(clusters)
+
+cluster_sizes <- table(membership_vector)
+
+membership_df <- data.frame(
+  name      = names(membership_vector),         
+  ClusterID = as.integer(membership_vector),
+  stringsAsFactors = FALSE
+)
+
+# Only keep clusters that have 2+ members, basically requiring that a peptide has similarity to another peptide to be included in downstream analyses 
+cluster_threshold <- 2
+valid_clusters <- names(cluster_sizes[cluster_sizes >= cluster_threshold])
+
+vertices_to_keep <- which(membership_vector %in% valid_clusters)
+g_filtered <- induced_subgraph(g, vids = vertices_to_keep)
+
+filtered_membership_vector <- membership_vector[vertices_to_keep]
+
+g_simplified <- simplify(g_filtered, remove.loops = TRUE)
+
+vertex_names_plot <- V(g_simplified)$name
+CHIKV_relevant_clusters <- membership_df %>%
+  filter(name %in% vertex_names_plot)
+
+CHIKV_relevant_clusters$id <- as.numeric(CHIKV_relevant_clusters$name)
+
+# Get the RPK counts for all the peptides that ended up in clusters
+CHIKV_relevant_clusters <- inner_join(CHIKV_relevant_clusters, Plates22and27_Combined, by = 'id')
+
+# Calculate the cluster reactivity scores 
+Plates22and27_CHIKV_cluster_sums <- CHIKV_relevant_clusters %>%
+  group_by(ClusterID) %>%
+  summarise(
+    across(3:64, \(x) sum(x, na.rm = TRUE)),
+    .groups = "drop"
+  )
+```
+
+```{r}
+temp <- Plates22and27_CHIKV_cluster_sums %>% as.data.frame()
+
+heatmap_data <- temp[,2:63]
+rownames(heatmap_data) <- as.character(temp$ClusterID)
+
+annotation_col <- data.frame(
+  DENV_IgG  = factor(Plates22and27_metadata$DENV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgG = factor(Plates22and27_metadata$CHIKV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgM = factor(Plates22and27_metadata$CHIKV_IgM, levels = c("pos", "neg", "not tested")) 
+)
+rownames(annotation_col) <- colnames(heatmap_data)
+
+annotation_colors <- list(
+  DENV_IgG = c("pos" = "#6c2525", "neg" = "lightgray",  "not tested" = '#a27d56'),
+  CHIKV_IgG = c("pos" = "#5f308c", "neg" = "lightgray", "not tested" = "#a27d56"),
+  CHIKV_IgM = c("pos" = "#b079ae", "neg" = "lightgray", "not tested" = "#a27d56")
+
+)
+
+# Order the columns to make interpretation more intuitive
+# First CHIKV_IgG, then by DENV_IgG
+ord <- order(annotation_col$CHIKV_IgG, annotation_col$DENV_IgG)
+
+heatmap_data            <- heatmap_data[, ord]
+annotation_col_ord  <- annotation_col[ord, ]
+
+cutoff <- 100      # Set a cutoff for the score to make the colors of the heatmap more useful
+n_col  <- 50       # Number of color steps below the cutoff
+
+# Define the color palette: last color will be used for all values >= cutoff
+my_cols <- colorRampPalette(c("white", "red", "purple"))(n_col)
+min_val <- min(heatmap_data, na.rm = TRUE)
+breaks <- seq(min_val, cutoff, length.out = n_col + 1)
+
+pheatmap(
+  (heatmap_data),
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = TRUE, # each rowname is the Cluster ID 
+  show_colnames = FALSE,
+  border_color = NA,
+  annotation_col = annotation_col_ord,
+  annotation_colors = annotation_colors,
+  color = my_cols,
+  breaks = breaks,
+  clustering_method = "average",
+  fontsize_col = 6,
+  main = "Cluster scores of each sample"
+)
+```
+
+```{r}
+# Find clusters with significantly different scores between CHIKV IgG+ and IgG- people 
+
+# Set up the dataframe to do the tests
+Plates22and27_CHIKV_cluster_sums_t <- data.frame(t(Plates22and27_CHIKV_cluster_sums[,2:63]))
+colnames(Plates22and27_CHIKV_cluster_sums_t) <- Plates22and27_CHIKV_cluster_sums$ClusterID
+Plates22and27_CHIKV_cluster_sums_t$Subject <- rownames(Plates22and27_CHIKV_cluster_sums_t)
+Plates22and27_CHIKV_cluster_sums_t$CHIKV_IgG <- Plates22and27_metadata$CHIKV_IgG
+
+df_long <- Plates22and27_CHIKV_cluster_sums_t %>%
+  pivot_longer(
+    cols = -c(Subject, CHIKV_IgG),        
+    names_to  = "ClusterID",
+    values_to = "value"
+  ) %>%
+  mutate(ClusterID = as.numeric(ClusterID)) 
+
+# Run the Wilcoxon test on a cluster-wise basis 
+wilcox_res <- df_long %>%
+  filter(CHIKV_IgG %in% c('neg', 'pos')) %>%
+  group_by(ClusterID) %>%
+  summarise(
+    p_value = wilcox.test(value ~ CHIKV_IgG)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))   # BH correction
+
+# Calculate log2 fold‑change between IgG+ vs IgG- using means, to make a volcano plot
+logfc_res <- df_long %>%
+  filter(CHIKV_IgG %in% c("neg", "pos")) %>%
+  group_by(ClusterID, CHIKV_IgG) %>%
+  summarise(
+    mean_val = mean(value, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from  = CHIKV_IgG,
+    values_from = mean_val
+  ) %>%
+  mutate(
+    log2FC_pos_vs_neg = log2((pos + 1) / (neg + 1))   
+  )
+
+# Combine things together to get a dataframe that can be used to make the volcano plot
+wilcox_res <- wilcox_res %>%
+  left_join(logfc_res, by = "ClusterID")
+
+wilcox_res$log10 <- -log10(wilcox_res$p_adj)
+
+# Keep only significant clusters
+sig_clusters <- wilcox_res %>%
+  filter(p_adj < 0.05) %>%
+  pull(ClusterID)
+
+df_long_sig <- df_long %>%
+  filter(ClusterID %in% sig_clusters)
+
+# Added this so I could take the values and plot them in GraphPad instead of using the R graphs below (for the sake of vectorization)
+df_long_sig$log2 <- log2(df_long_sig$value+1)
+
+# Plot the cluster reactivity scores for each sample 
+ggplot(df_long_sig, aes(x = CHIKV_IgG, y = log2(value + 1), fill = CHIKV_IgG)) +
+  scale_fill_manual(
+    values = c("neg" = "gray", "not tested" = "#b079ae", "pos" = "#5f308c"),
+    name   = "CHIKV_IgG"
+  ) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 1) +
+  facet_wrap(~ ClusterID, scales = "free_y") +
+  labs(
+    x = "group",
+    y = "Cluster sum (log2+1)",
+    title = "Cluster values by group status"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+
+```
+
+```{r}
+# Three significant clusters came out of this analysis 
+# Want to align them to the CHIKV proteome to see what parts of the virus are being targeted by antibodies 
+
+CHIKV_IgG_significant_clusters <- CHIKV_relevant_clusters[as.logical(CHIKV_relevant_clusters$ClusterID == "22" | 
+                                                                              CHIKV_relevant_clusters$ClusterID == "23" |
+                                                                              CHIKV_relevant_clusters$ClusterID == "24"),]
+
+CHIKV_IgG_significant_clusters$ForAlignment <- paste0(">", CHIKV_IgG_significant_clusters$id, " ", CHIKV_IgG_significant_clusters$`AA Sequence`)
+
+setwd('filepath')
+
+# Create an AAStringSet object
+seqs <- AAStringSet(CHIKV_IgG_significant_clusters$'AA Sequence')
+  # Add names from the sequence header column
+names(seqs) <- paste0(CHIKV_IgG_significant_clusters$id, "_Cluster", CHIKV_IgG_significant_clusters$ClusterID)
+writeXStringSet(seqs, filepath = "CHIKV_IgG_significant_clusters.faa")
+```
+
+cd 'filepath' 
+
+makeblastdb -in CHIKV_Structural_Polyprotein.faa -out db -parse_seqids -dbtype prot 
+blastp -query CHIKV_IgG_significant_clusters.faa -db db -outfmt 6 -max_hsps 1 -out CHIKV_IgG_significant_clusters.txt 
+
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' CHIKV_IgG_significant_clusters.txt > CHIKV_IgG_significant_clusters.csv
+
+```{r}
+CHIKV_IgG_significant_clusters_peptides <- read.csv('filepath/CHIKV_IgG_significant_clusters.csv', header=FALSE)
+CHIKV_IgG_significant_clusters_peptides$seq_id <- CHIKV_IgG_significant_clusters_peptides[,1]
+
+CHIKV_IgG_significant_clusters_peptides <- CHIKV_IgG_significant_clusters_peptides %>%
+  separate( col   = seq_id, into  = c("id"), sep   = "_", remove = TRUE ) %>% mutate(id = as.numeric(id)  )
+
+CHIKV_IgG_significant_clusters_peptides$Species <- VectorScan$Species[match(CHIKV_IgG_significant_clusters_peptides$id, VectorScan$id)]
+CHIKV_IgG_significant_clusters_peptides$Protein <- VectorScan$Protein[match(CHIKV_IgG_significant_clusters_peptides$id, VectorScan$id)]
+CHIKV_IgG_significant_clusters_peptides$AA <- VectorScan$'AA Sequence'[match(CHIKV_IgG_significant_clusters_peptides$id, VectorScan$id)]
+CHIKV_IgG_significant_clusters_peptides$ForAlignment <- paste0(">", CHIKV_IgG_significant_clusters_peptides$V2, " ",CHIKV_IgG_significant_clusters_peptides$AA)
+CHIKV_IgG_significant_clusters_peptides$AANumber <- CHIKV_IgG_significant_clusters_peptides$V9  + (CHIKV_IgG_significant_clusters_peptides$V8 - CHIKV_IgG_significant_clusters_peptides$V7)/2
+CHIKV_IgG_significant_clusters_peptides$ClusterID <- CHIKV_IgG_significant_clusters$ClusterID[match(CHIKV_IgG_significant_clusters_peptides$id, CHIKV_IgG_significant_clusters$id)]
+
+CHIKV_IgG_significant_clusters_peptides <- CHIKV_IgG_significant_clusters_peptides[as.logical(CHIKV_IgG_significant_clusters_peptides$ClusterID != "1"),]
+```
+
+```{r}
+# Looking at the peptides that make up Cluster 22, specifically 
+
+CHIKV_IgG_cluster22 <- CHIKV_IgG_significant_clusters[as.logical(CHIKV_IgG_significant_clusters$ClusterID == "22"),]
+
+temp <- CHIKV_IgG_cluster22
+
+heatmap_data <- temp[,4:65]
+rownames(heatmap_data) <- temp$id
+
+annotation_col <- data.frame(
+  DENV_IgG  = factor(Plates22and27_metadata$DENV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgG = factor(Plates22and27_metadata$CHIKV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgM = factor(Plates22and27_metadata$CHIKV_IgM, levels = c("pos", "neg", "not tested")) 
+)
+rownames(annotation_col) <- colnames(heatmap_data)
+
+
+annotation_colors <- list(
+  DENV_IgG = c("pos" = "#6c2525", "neg" = "lightgray",  "not tested" = '#a27d56'),
+  CHIKV_IgG = c("pos" = "#5f308c", "neg" = "lightgray", "not tested" = "#a27d56"),
+  CHIKV_IgM = c("pos" = "#b079ae", "neg" = "lightgray", "not tested" = "#a27d56")
+
+)
+
+ord <- order(annotation_col$CHIKV_IgG, annotation_col$DENV_IgG)
+heatmap_data            <- heatmap_data[, ord]
+annotation_col_ord  <- annotation_col[ord, ]
+
+cutoff <- 500
+n_col  <- 50 
+
+my_cols <- colorRampPalette(c("white", "red", "purple"))(n_col)
+min_val <- min(heatmap_data, na.rm = TRUE)
+breaks <- seq(min_val, cutoff, length.out = n_col + 1)
+
+pheatmap(
+  (heatmap_data),
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = TRUE,
+  show_colnames = FALSE,
+  border_color = NA,
+  annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
+  color = my_cols,
+  breaks = breaks,
+  clustering_method = "average",
+  fontsize_col = 6,
+  main = "Cluster reactivity scores of each sample"
+)
+```
+
+Use the same proteome to compare where the ElliPro hits are:
+
+ElliPro E2
+hit 1: YKCNCGGSNEGLTTTDKVINNCKVDQCH
+hit 2: LSYRNMGEEPNYQEEWVMHKKEVVLTVPTEGLEVT
+
+E1 
+hit 1: DYSCKVFTGVYPFMWGGAYCFCDAENTQLSE
+
+cd 'filepath' 
+
+makeblastdb -in CHIKV_Structural_Polyprotein.faa -out db -parse_seqids -dbtype prot 
+blastp -query ElliPro_CV_hits.faa -db db -outfmt 6 -max_hsps 1 -out ElliPro_CV_hits.txt 
+
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' ElliPro_CV_hits.txt > ElliPro_CV_hits.csv
+
+```{r}
+ElliPro_CV_hits <- read.csv('filepath/ElliPro_CV_hits.csv', header=FALSE)
+ElliPro_CV_hits$seq_id <- ElliPro_CV_hits[,1]
+```
+
+
+CHIKV IgM+ v IgM- analysis -- Mosquito focused 
+
+```{r}
+# Find all the mosquito-derived peptides that are seroreactive in at least 1 sample 
+temp <- Plates22and27_Combined
+temp <- temp[as.logical(temp$Group == "Mosquito"),]
+temp <- temp[as.logical(rowSums(temp[,1:62])>0),]
+
+counts_of_interest <- data.frame(
+  column = names(temp[,1:62]),
+  n_counts  = colSums(temp[,1:62] > 0, na.rm = TRUE))
+counts_of_interest <- cbind(counts_of_interest, Plates22and27_metadata)
+
+# To get the mosquito breadth
+depth <- data.frame(
+  column = names(temp[,1:62]),
+  n_counts  = colSums(temp[,1:62], na.rm = TRUE))
+depth <- cbind(depth, Plates22and27_metadata)
+
+# Set up everything to do clustering of the mosquito peptides 
+
+temp_ids <- temp$id 
+
+Mosquito_peptides_of_interest <- data.frame(id = temp_ids)
+Mosquito_peptides_of_interest <- inner_join(Mosquito_peptides_of_interest, VectorScan, by = 'id')
+
+setwd('filepath')
+
+# Create an AAStringSet object
+seqs <- AAStringSet(Mosquito_peptides_of_interest$'AA Sequence')
+  # Add names from the sequence header column
+names(seqs) <- paste0(Mosquito_peptides_of_interest$id)
+writeXStringSet(seqs, filepath = "Mosquito_peptides_of_interest.faa")
+```
+
+cd 'filepath' 
+
+makeblastdb -in Mosquito_peptides_of_interest.faa -out db -parse_seqids -dbtype prot 
+blastp -query Mosquito_peptides_of_interest.faa -db db -outfmt 6 -max_hsps 1 -out Mosquito_peptides_of_interest.txt 
+
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' Mosquito_peptides_of_interest.txt > Mosquito_peptides_of_interest.csv
+
+```{r}
+# Make the clusters, using the same base code as above 
+
+rm(membership_df)
+rm(membership_vector)
+rm(edge_list)
+rm(g)
+rm(Mosquito_relevant_clusters)
+rm(Plates22and27_Mosquito_cluster_sums)
+
+setwd('filepath')
+
+Subject_BLAST <- read.csv('Mosquito_peptides_of_interest.csv', header = FALSE)
+Subject_BLAST <- Subject_BLAST[as.logical(Subject_BLAST$V12 >= 40), ]
+
+edge_list <- Subject_BLAST[, c("V1", "V2")]
+g <- graph_from_data_frame(d = edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
+
+set.seed(123)  
+clusters <- cluster_louvain(g)
+membership_vector <- membership(clusters)
+
+cluster_sizes <- table(membership_vector)
+
+membership_df <- data.frame(
+  name      = names(membership_vector),          
+  ClusterID = as.integer(membership_vector),
+  stringsAsFactors = FALSE
+)
+
+cluster_threshold <- 2
+valid_clusters <- names(cluster_sizes[cluster_sizes >= cluster_threshold])
+
+vertices_to_keep <- which(membership_vector %in% valid_clusters)
+g_filtered <- induced_subgraph(g, vids = vertices_to_keep)
+
+filtered_membership_vector <- membership_vector[vertices_to_keep]
+
+g_simplified <- simplify(g_filtered, remove.loops = TRUE)
+
+vertex_names_plot <- V(g_simplified)$name
+Mosquito_relevant_clusters <- membership_df %>%
+  filter(name %in% vertex_names_plot)
+
+Mosquito_relevant_clusters$id <- as.numeric(Mosquito_relevant_clusters$name)
+
+Mosquito_relevant_clusters <- inner_join(Mosquito_relevant_clusters, Plates22and27_Combined, by = 'id')
+
+Plates22and27_Mosquito_cluster_sums <- Mosquito_relevant_clusters %>%
+  group_by(ClusterID) %>%
+  summarise(
+    across(3:64, \(x) sum(x, na.rm = TRUE)),
+    .groups = "drop"
+  )
+```
+
+
+```{r}
+temp <- Plates22and27_Mosquito_cluster_sums
+
+heatmap_data <- temp[,2:63]
+rownames(heatmap_data) <- temp$ClusterID
+
+annotation_col <- data.frame(
+  DENV_IgG  = factor(Plates22and27_metadata$DENV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgG = factor(Plates22and27_metadata$CHIKV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgM = factor(Plates22and27_metadata$CHIKV_IgM, levels = c("pos", "neg", "not tested")) 
+)
+rownames(annotation_col) <- colnames(heatmap_data)
+
+
+annotation_colors <- list(
+  DENV_IgG = c("pos" = "#6c2525", "neg" = "lightgray",  "not tested" = '#a27d56'),
+  CHIKV_IgG = c("pos" = "#5f308c", "neg" = "lightgray", "not tested" = "#a27d56"),
+  CHIKV_IgM = c("pos" = "#b079ae", "neg" = "lightgray", "not tested" = "#a27d56")
+
+)
+
+ord <- order(annotation_col$CHIKV_IgG, annotation_col$DENV_IgG)
+heatmap_data            <- heatmap_data[, ord]
+annotation_col_ord  <- annotation_col[ord, ]
+
+cutoff <- 50
+n_col  <- 50
+
+my_cols <- colorRampPalette(c("white", "red", "purple"))(n_col)
+min_val <- min(heatmap_data, na.rm = TRUE)
+breaks <- seq(min_val, cutoff, length.out = n_col + 1)
+
+pheatmap(
+  (heatmap_data),
+  cluster_rows = TRUE,
+  cluster_cols = FALSE,
+  show_rownames = FALSE,
+  show_colnames = FALSE,
+  border_color = NA,
+  annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
+  color = my_cols,
+  breaks = breaks,
+  clustering_method = "average",
+  fontsize_col = 6,
+  main = "Cluster scores of each sample"
+)
+
+```
+
+```{r}
+# Find the clusters that have a significant difference in scores between IgM+ and IgM- people 
+
+Plates22and27_Mosquito_cluster_sums_t <- data.frame(t(Plates22and27_Mosquito_cluster_sums[,2:63]))
+colnames(Plates22and27_Mosquito_cluster_sums_t) <- Plates22and27_Mosquito_cluster_sums$ClusterID
+Plates22and27_Mosquito_cluster_sums_t$Subject <- rownames(Plates22and27_Mosquito_cluster_sums_t)
+Plates22and27_Mosquito_cluster_sums_t$CHIKV_IgM <- Plates22and27_metadata$CHIKV_IgM
+
+df_long <- Plates22and27_Mosquito_cluster_sums_t %>%
+  pivot_longer(
+    cols = -c(Subject, CHIKV_IgM),
+    names_to  = "ClusterID",
+    values_to = "value"
+  )
+
+wilcox_res <- df_long %>%
+  filter(CHIKV_IgM %in% c('neg', 'pos')) %>%
+  group_by(ClusterID) %>%
+  summarise(
+    p_value = wilcox.test(value ~ CHIKV_IgM)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))   # FDR correction
+
+logfc_res <- df_long %>%
+  filter(CHIKV_IgM %in% c("neg", "pos")) %>%
+  group_by(ClusterID, CHIKV_IgM) %>%
+  summarise(
+    median_val = mean(value, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from  = CHIKV_IgM,
+    values_from = median_val
+  ) %>%
+  mutate(
+    log2FC_pos_vs_neg = log2((pos + 1) / (neg + 1)) 
+  )
+
+wilcox_res <- wilcox_res %>%
+  left_join(logfc_res, by = "ClusterID")
+
+wilcox_res$`-log10(padj)` <- -log10(wilcox_res$p_adj)
+  
+sig_clusters <- wilcox_res %>%
+  filter(p_adj < 0.05) %>%
+  pull(ClusterID)
+
+df_long_sig <- df_long %>%
+  filter(ClusterID %in% sig_clusters)
+
+df_long_sig$log2 <- log2(df_long_sig$value+1)
+
+# This is a much bigger list of clusters, so saving it externally to be able to make the volcano plot in GraphPad 
+setwd('filepath')
+write_xlsx(wilcox_res, "Mosquito_wilcox_res.xlsx")
+
+wilcox_res$Significant <- (wilcox_res$p_adj < 0.05)
+p_threshold <- 0.05 
+
+ggplot(wilcox_res, aes(x = log2FC_pos_vs_neg, y = -log10(p_adj), color = Significant)) +
+  geom_point(alpha = 1) +
+  scale_color_manual(values = c("gray", "red")) +
+  geom_vline(xintercept = c(0), linetype = "dashed", color = "gray") +
+  geom_hline(yintercept = -log10(p_threshold), linetype = "dashed", color = "gray") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank()) +
+  labs(
+    x = "log2 Fold Change (IgM+ vs. IgM-)",
+    y = "-log10(padj)",
+    title = "Volcano Plot: CHIKV IgM+ vs IgM-"
+  )
+
+ggplot(df_long_sig, aes(x = CHIKV_IgM, y = log2(value + 1), fill = CHIKV_IgM)) +
+  scale_fill_manual(
+    values = c("neg" = "gray", "pos" = "#b079ae"),
+    name   = "CHIKV_IgG"
+  ) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 1) +
+  facet_wrap(~ ClusterID, scales = "free_y") +
+  labs(
+    x = "group",
+    y = "Cluster sum (log2)",
+    title = "Cluster values by group status"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  )
+```
+
+```{r}
+# Looking more at the mosquito-derived clusters
+
+Mosquito_IgM_significant_clusters <- Mosquito_relevant_clusters[as.logical(Mosquito_relevant_clusters$ClusterID == "1574" | 
+                                                                              Mosquito_relevant_clusters$ClusterID == "3568"),]
+
+Mosquito_IgM_significant_clusters$ForAlignment <- paste0(">", Mosquito_IgM_significant_clusters$id, " ", Mosquito_IgM_significant_clusters$`AA Sequence`)
+```
+
+```{r}
+temp <- Mosquito_IgM_significant_clusters[as.logical(Mosquito_IgM_significant_clusters$ClusterID == "1574"),]
+
+heatmap_data <- temp[,4:65]
+rownames(heatmap_data) <- temp$id
+
+annotation_col <- data.frame(
+  DENV_IgG  = factor(Plates22and27_metadata$DENV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgG = factor(Plates22and27_metadata$CHIKV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgM = factor(Plates22and27_metadata$CHIKV_IgM, levels = c("pos", "neg", "not tested")) 
+)
+rownames(annotation_col) <- colnames(heatmap_data)
+
+
+annotation_colors <- list(
+  DENV_IgG = c("pos" = "#6c2525", "neg" = "lightgray",  "not tested" = '#a27d56'),
+  CHIKV_IgG = c("pos" = "#5f308c", "neg" = "lightgray", "not tested" = "#a27d56"),
+  CHIKV_IgM = c("pos" = "#b079ae", "neg" = "lightgray", "not tested" = "#a27d56")
+
+)
+
+ord <- order(annotation_col$CHIKV_IgG, annotation_col$DENV_IgG)
+heatmap_data            <- heatmap_data[, ord]
+annotation_col_ord  <- annotation_col[ord, ]
+
+cutoff <- 50
+n_col  <- 50
+
+my_cols <- colorRampPalette(c("white", "red", "purple"))(n_col)
+min_val <- min(heatmap_data, na.rm = TRUE)
+breaks <- seq(min_val, cutoff, length.out = n_col + 1)
+
+pheatmap(
+  (heatmap_data),
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = TRUE,
+  show_colnames = FALSE,
+  border_color = NA,
+  annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
+  color = my_cols,
+  breaks = breaks,
+  clustering_method = "average",
+  fontsize_col = 6,
+  main = "Cluster scores of each sample"
+)
+```
+
+```{r}
+temp <- Mosquito_IgM_significant_clusters[as.logical(Mosquito_IgM_significant_clusters$ClusterID == "3568"),]
+
+heatmap_data <- temp[,4:65]
+rownames(heatmap_data) <- temp$id
+
+annotation_col <- data.frame(
+  DENV_IgG  = factor(Plates22and27_metadata$DENV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgG = factor(Plates22and27_metadata$CHIKV_IgG, levels = c("pos", "neg", "not tested")),
+  CHIKV_IgM = factor(Plates22and27_metadata$CHIKV_IgM, levels = c("pos", "neg", "not tested")) 
+)
+rownames(annotation_col) <- colnames(heatmap_data)
+
+
+annotation_colors <- list(
+  DENV_IgG = c("pos" = "#6c2525", "neg" = "lightgray",  "not tested" = '#a27d56'),
+  CHIKV_IgG = c("pos" = "#5f308c", "neg" = "lightgray", "not tested" = "#a27d56"),
+  CHIKV_IgM = c("pos" = "#b079ae", "neg" = "lightgray", "not tested" = "#a27d56")
+
+)
+
+ord <- order(annotation_col$CHIKV_IgG, annotation_col$DENV_IgG)
+heatmap_data            <- heatmap_data[, ord]
+annotation_col_ord  <- annotation_col[ord, ]
+
+cutoff <- 50
+n_col  <- 50
+
+my_cols <- colorRampPalette(c("white", "red", "purple"))(n_col)
+min_val <- min(heatmap_data, na.rm = TRUE)
+breaks <- seq(min_val, cutoff, length.out = n_col + 1)
+
+pheatmap(
+  (heatmap_data),
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = TRUE,
+  show_colnames = FALSE,
+  border_color = NA,
+  annotation_col = annotation_col,
+  annotation_colors = annotation_colors,
+  color = my_cols,
+  breaks = breaks,
+  clustering_method = "average",
+  fontsize_col = 6,
+  main = "Cluster scores of each sample"
+)
+```
+
+```{r}
+# Do the fisher tests to determine whether specific genera are overrepresented among the peptides in these clusters 
+
+df <- Mosquito_IgM_significant_clusters # The peptides that are in these significant clusters
+larger_set <- Mosquito_relevant_clusters # All peptides that clustered 
+
+families <- sort(unique(larger_set$Family))
+
+fisher_results_list <- lapply(families, function(group_to_test) {
+  
+  df2 <- df[df$Family == group_to_test, ]
+  
+  temp1 <- nrow(df2) # Clustered & in genus X 
+  temp2 <- nrow(larger_set[larger_set$Family == group_to_test, ]) - temp1  # Not clustered & in genus X
+  temp3 <- nrow(df) - temp1 # Clustered & not in genus X
+  temp4 <- nrow(larger_set) - temp1 - temp2 - temp3  # Not clustered & not in genus X
+  
+  contingency_table <- matrix(c(temp1, temp2,
+                                temp3, temp4),
+                              nrow = 2,
+                              byrow = TRUE,
+                              dimnames = list(
+                                Clustered = c("Yes", "No"),
+                                Family    = c(group_to_test, "Other")
+                              ))
+  
+  ft <- fisher.test(contingency_table)
+  
+  data.frame(
+    Family       = group_to_test,
+    clustered_in_genus  = temp1,
+    not_clustered_in_genus   = temp2,
+    clustered_not_genus = temp3,
+    not_clustered_not_genus  = temp4,
+    odds_ratio  = unname(ft$estimate),
+    conf_low           = ft$conf.int[1],
+    conf_high          = ft$conf.int[2],
+    p_value     = ft$p.value,
+    stringsAsFactors = FALSE
+  )
+})
+
+fisher_results <- do.call(rbind, fisher_results_list)
+fisher_results$p_adj <- p.adjust(fisher_results$p_value, method = "bonferroni") # Chose bonferroni because there is a small number of comparisons
+fisher_results$significant <- fisher_results$p_adj < 0.05
+fisher_results
+```
+
+
