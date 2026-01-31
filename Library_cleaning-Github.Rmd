@@ -1,0 +1,29 @@
+Cleaning the library 
+
+```{r}
+setwd('filepath')
+VectorScan <- read_xlsx("VectorScan_Library_1_2.xlsx")
+```
+
+```{r}
+VectorScan_GSLinkerNoise <- VectorScan[grep("GSGGGSGGGSG", VectorScan$'AA Sequence'), ]
+VectorScan_cleaned <- anti_join(VectorScan, VectorScan_GSLinkerNoise, by = 'id')
+
+nrow(VectorScan)
+nrow(VectorScan_cleaned)
+```
+
+```{r}
+setwd('filepath')
+write_xlsx(VectorScan_cleaned, 'VectorScan_cleaned.xlsx')
+```
+
+```{r}
+View(table(VectorScan$Group))
+View(table(VectorScan$Family))
+View(table(VectorScan$Species))
+
+View(table(VectorScan_cleaned$Group))
+View(table(VectorScan_cleaned$Family))
+View(table(VectorScan_cleaned$Species))
+```
