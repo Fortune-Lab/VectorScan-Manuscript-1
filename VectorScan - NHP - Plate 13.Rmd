@@ -1,0 +1,1192 @@
+```{r}
+# Load relevant libraries 
+library(Biostrings)
+library('dplyr')
+library('corrplot')
+library('writexl')
+library('readxl')
+library('seqinr')
+library(ggplot2)
+library(gridExtra)
+library(ggfortify)
+library(pheatmap)
+library(Biostrings)
+library(tidyverse)
+library(igraph)
+library(RColorBrewer)
+library(reshape2)
+```
+
+ANALYSIS OF NHP DATA (PLATE 13)
+----
+
+After getting the demultiplexed fastq files back from the Bauer core, the following workflow was used to align to bowtie 
+
+In terminal: 
+cd [[Path to fastq files]]
+
+Cut off the first part so that only the actual peptide part is there:
+for fq in *.fastq.gz; do cutadapt -g TCCAGTCAGGTGTGATGCTCGGGGATCCAGGAATTCGGAGCGGT -o ${fq%%.*}.cut.fastq.gz $fq; done 
+
+```{r}
+Bowtie_38bp_fasta <- data.frame(id = VectorScan$id, Seq = substr(VectorScan$'DNA Sequence', 1, 38))
+seqs <- AAStringSet(Bowtie_38bp_fasta$Seq)
+names(seqs) <- paste0(Bowtie_38bp_fasta$id)
+writeXStringSet(seqs, filepath ="VectorScan_Bowtie_38bp.fasta")
+```
+
+In terminal again: 
+
+Make the bowtie2 index: 
+bowtie2-build -f VectorScan_Bowtie_38bp.fasta VectorScan_38bp
+
+Perform the alignment: 
+for fq in *.cut.fastq.gz; do bowtie2 -x VectorScan_38bp --very-sensitive -U $fq -S ${fq%%.*}.sam; done
+
+Turn into count files
+for i in *.sam; do samtools view -bS $i > ${i%.*}.bam; done
+for i in *.bam; do samtools sort $i -o ${i%.*}.sorted.bam; done
+for i in *.sorted.bam; do samtools index $i; done
+for i in *.sorted.bam; do samtools idxstats $i | cut -f 1,3 | gsed -e'/^\*\t/d' -e'1 i id\t'${i%%.*}| tr "\\t" "," > ${i%%.*}.count.csv; done
+
+Gzip the counts files with the following command.
+for i in *count.csv; do gzip $i; done
+
+Combine the count files together for each sample
+
+for i in *L001_R1_001.count.csv.gz; do python combine_two_lanes.py $i ${i%1_R1_001.count.csv.gz}2_R1_001.count.csv.gz ${i%1_R1_001.count.csv.gz}1_2_R1_001.count.csv; done
+
+for i in *L003_R1_001.count.csv.gz; do python combine_two_lanes.py $i ${i%3_R1_001.count.csv.gz}4_R1_001.count.csv.gz ${i%3_R1_001.count.csv.gz}3_4_R1_001.count.csv; done
+
+for i in *L001_2_R1_001.count.csv; do python combine_two_lanes.py $i ${i%1_2_R1_001.count.csv}3_4_R1_001.count.csv ${i%1_2_R1_001.count.csv}1_2_3_4_R1_001.count.combined.csv; done
+
+Combine all the count files together 
+paste -d ',' *.count.combined.csv >2024_11_12_VectorScan_Plate13_VectorScan_counts.csv
+
+Read in the library and the cleaned library to do analysis 
+```{r}
+VectorScan <- read_xlsx("VectorScan_Library.xlsx")  ## Path to the library file
+VectorScan_cleaned <- read_xlsx("VectorScan_cleaned.xlsx") ## Path to the cleaned library file generated via "Library characteriation" code
+```
+
+```{r}
+# Read in the counts file. Each column is a replicate, each row is a peptide in the library.
+Plate13_VectorScan_counts <- read.csv("2024_11_12_VectorScan_Plate13_VectorScan_counts.csv")
+cols_to_remove <- grepl("id", names(Plate13_VectorScan_counts))
+Plate13_VectorScan_counts_cleaned <- Plate13_VectorScan_counts[, !cols_to_remove]
+colnames(Plate13_VectorScan_counts_cleaned) <- make.unique(c('PBS', 'PBS', 'PI1', 'PI1', 'PI2', 'PI2', 'PBS', 'PBS', 'PI4', 'PI4', 'EI1', 'EI1', 'EI2', 'EI2', 'EI3', 'EI3', 'EI4', 'EI4', 'LI1', 'LI1', 'LI2', 'LI2', 'LI3', 'LI3', 'LI4', 'LI4', 'PBS', 'PBS'))
+cols_to_remove <- grepl("I3", colnames(Plate13_VectorScan_counts_cleaned))
+Plate13_VectorScan_counts_cleaned <- Plate13_VectorScan_counts_cleaned[,!cols_to_remove]
+
+# Calculate the RPK for each replicate
+Plate13_Round1_RPK <- Plate13_VectorScan_counts_cleaned
+Plate13_Round1_RPK <- sweep(Plate13_Round1_RPK, 2, colSums(Plate13_Round1_RPK), FUN = "/") * 1e5
+
+# Get the median RPK across each mock IP well (sample replaced with PBS)
+cols_with_word <- grep("PBS", names(Plate13_Round1_RPK), value = TRUE)
+Plate13_PBS <- Plate13_Round1_RPK[, cols_with_word]
+Plate13_PBS$median <- apply(Plate13_PBS, 1, median)
+
+Plate13_Round1_FC_byPBSmedian <- (Plate13_Round1_RPK+1) / (Plate13_PBS$median+1)
+
+# Compare the correlation between replicates post-normalization 
+desired_order <- c("PI1", "PI1.1", "EI1", "EI1.1", "LI1", "LI1.1", "PI2", "PI2.1", "LI2", "LI2.1" ,"EI2", "EI2.1","PI4", "PI4.1", "EI4", "EI4.1", "LI4", "LI4.1", "PBS", "PBS.1", "PBS.2", "PBS.3", "PBS.4", "PBS.5")
+temp <- Plate13_Round1_FC_byPBSmedian[, desired_order, drop = FALSE]
+cor_matrix <- cor(temp,temp, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+```{r}
+# INCLUDE all peptides, so there is no filtering here 
+
+identifiers <- c('I1', 'I2', 'I4')
+
+Plate13_VectorScan_All_results_list <- list()
+Plate13_VectorScan_EnrichedOnly_results_list  <- list()
+Plate13_VectorScan_EnrichedDengueOnly_results_list  <- list()
+Plate13_VectorScan_Random_results_list <- list()
+
+for (identifier in identifiers) {
+  selected_columns <- grep(identifier, names(Plate13_Round1_FC_byPBSmedian), value = TRUE)
+  Pt <- Plate13_Round1_FC_byPBSmedian[, selected_columns]
+  Pt$id <- VectorScan$id
+  
+  Pt$Pre <- (Pt[,1] + Pt[,2])/2
+  Pt$Early <- (Pt[,3] + Pt[,4])/2
+  Pt$Late <- (Pt[,5] + Pt[,6])/2
+  
+  Pt$EarlyDiff <- Pt$Early - Pt$Pre
+  Pt$LateDiff <- Pt$Late - Pt$Pre
+  
+  Pt <- inner_join(Pt, VectorScan, by = 'id')
+  
+  Plate13_VectorScan_All_results_list[[identifier]] <- Pt
+  
+  temp <- Pt[as.logical(Pt$Species == 'random'),]
+  Plate13_VectorScan_Random_results_list[[identifier]] <- temp
+  
+  Pre_enriched <- quantile(temp$Pre, 0.8)*2
+  Early_enriched <- quantile(temp$Early, 0.8)*2
+  Late_enriched <- quantile(temp$Late, 0.8)*2
+    
+  ### TO FIND PEPTIDES THAT ARE ENRICHED POST-EXPOSURE 
+  
+  # They need to have no pre-immunity 
+  Pt <- Pt[as.logical(Pt[,1] < Pre_enriched & Pt[,2] < Pre_enriched ),]
+  
+  # For the early timepoint, both replicates need to be either seroreactive or seronegative 
+  Pt <- Pt[as.logical((Pt[,3] > Early_enriched & Pt[,4] > Early_enriched) | (Pt[,3] < Early_enriched & Pt[,4] < Early_enriched)),]
+  
+  # For the late timepoint, both replicates need to be either seroreactive or seronegative 
+  Pt <- Pt[as.logical((Pt[,5] > Early_enriched & Pt[,6] > Early_enriched) | (Pt[,5] < Early_enriched & Pt[,6] < Early_enriched)),]
+  
+  # At least one timepoint needs to be seroreactive 
+  Pt <- Pt[as.logical((Pt[,3] > Early_enriched & Pt[,4] > Early_enriched) | (Pt[,5] > Late_enriched & Pt[,6] > Late_enriched)),]
+  
+  # Whatever is seroreactive needs to have a meaningful increase in signal
+  Pt <- Pt[as.logical(Pt$EarlyDiff > 1 | Pt$LateDiff > 1),]
+  
+  Plate13_VectorScan_EnrichedOnly_results_list[[identifier]] <- Pt
+  
+  # Narrow down even further to just keep Dengue peptides 
+  Pt <- Pt[(Pt$Species == "DV"), ]
+  
+  Plate13_VectorScan_EnrichedDengueOnly_results_list[[identifier]] <- Pt
+}
+```
+
+```{r}
+combined_data <- do.call(rbind, lapply(names(Plate13_VectorScan_Random_results_list), function(i) {
+  df <- Plate13_VectorScan_Random_results_list[[i]]
+  df$id <- paste("NHP ", i, sep = "")
+  # Select only Pre, Early and Late, along with the peptide ID
+  df <- df[, c("Pre", "Early", "Late", "id")]
+  return(df)
+}))
+
+melted_data <- melt(combined_data, id.vars = "id", variable.name = "Day", value.name = "Value")
+
+quantiles <- melted_data %>%
+  group_by(id, Day) %>%
+  summarize(quintile_0_8 = quantile(Value, 0.8, na.rm = TRUE)) %>%
+  mutate(quintile_0_8_times_2 = quintile_0_8 * 2)  
+
+quantiles$interaction_label <- with(quantiles, interaction(id, Day))
+
+ggplot(melted_data, aes(x = interaction(id, Day), y = Value)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(width = 0.2, alpha = 0.5) +  
+  scale_y_log10() +
+  geom_point(data = quantiles, aes(x = interaction_label, y = quintile_0_8), 
+             color = "red", size = 2, shape = 16) +
+  geom_point(data = quantiles, aes(x = interaction_label, y = quintile_0_8_times_2), 
+             color = "blue", size = 2, shape = 16) +  
+  labs(x = "Sample", y = "Fold change over Mock IPs (log10)", title = "Boxplot with Quantile Points for Each Sample") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), legend.position = "none")
+```
+```{r}
+# To get the percentage of peptides from each group that you're looking at (used to produce graphs)
+
+identifiers <- c('I1', 'I2', 'I4')
+
+results_list <- list()
+
+for (id in identifiers) {
+  df <- Plate13_VectorScan_EnrichedOnly_results_list[[id]]
+  
+  ## Group 
+  #percentage_table <- table(df$Group) / sum(table(df$Group)) * 100
+#  percentage_df <- as.data.frame(percentage_table)
+#  colnames(percentage_df) <- c("Group", "Percentage")
+ # percentage_df$Identifier <- id
+  
+  ## Family 
+ # percentage_table <- table(df$Family) / sum(table(df$Family)) * 100
+  #percentage_df <- as.data.frame(percentage_table)
+  #colnames(percentage_df) <- c("Family", "Percentage")
+  #percentage_df$Identifier <- id
+  
+  ## Species 
+  percentage_table <- table(df$Species) / sum(table(df$Species)) * 100
+  percentage_df <- as.data.frame(percentage_table)
+  colnames(percentage_df) <- c("Species", "Percentage")
+  percentage_df$Identifier <- id
+
+  results_list[[id]] <- percentage_df
+}
+
+combined_results <- bind_rows(results_list)
+
+print(combined_results)
+```
+
+```{r}
+# EXCLUDING peptides with long GS linkers and that are not represented
+
+identifiers <- c('I1', 'I2', 'I4')
+
+Plate13_VectorScan_All_results_list <- list()
+Plate13_VectorScan_EnrichedOnly_results_list  <- list()
+Plate13_VectorScan_EnrichedDengueOnly_results_list  <- list()
+Plate13_VectorScan_Random_results_list <- list()
+
+for (identifier in identifiers) {
+  selected_columns <- grep(identifier, names(Plate13_Round1_FC_byPBSmedian), value = TRUE)
+  Pt <- Plate13_Round1_FC_byPBSmedian[, selected_columns]
+  Pt$id <- VectorScan$id
+  
+  Pt$Pre <- (Pt[,1] + Pt[,2])/2
+  Pt$Early <- (Pt[,3] + Pt[,4])/2
+  Pt$Late <- (Pt[,5] + Pt[,6])/2
+  
+  Pt$EarlyDiff <- Pt$Early - Pt$Pre
+  Pt$LateDiff <- Pt$Late - Pt$Pre
+  
+  Pt <- inner_join(Pt, VectorScan_cleaned, by = 'id')
+  
+  Plate13_VectorScan_All_results_list[[identifier]] <- Pt
+  
+  temp <- Pt[as.logical(Pt$Species == 'random'),]
+  Plate13_VectorScan_Random_results_list[[identifier]] <- temp
+  
+  Pre_enriched <- quantile(temp$Pre, 0.8)*2
+  Early_enriched <- quantile(temp$Early, 0.8)*2
+  Late_enriched <- quantile(temp$Late, 0.8)*2
+    
+  ### TO FIND PEPTIDES THAT ARE ENRICHED POST-EXPOSURE 
+  
+  # They need to have no pre-immunity 
+  Pt <- Pt[as.logical(Pt[,1] < Pre_enriched & Pt[,2] < Pre_enriched ),]
+  
+  # For the early timepoint, both replicates need to be either seroreactive or seronegative 
+  Pt <- Pt[as.logical((Pt[,3] > Early_enriched & Pt[,4] > Early_enriched) | (Pt[,3] < Early_enriched & Pt[,4] < Early_enriched)),]
+  
+  # For the late timepoint, both replicates need to be either seroreactive or seronegative 
+  Pt <- Pt[as.logical((Pt[,5] > Early_enriched & Pt[,6] > Early_enriched) | (Pt[,5] < Early_enriched & Pt[,6] < Early_enriched)),]
+  
+  # At least one timepoint needs to be seroreactive 
+  Pt <- Pt[as.logical((Pt[,3] > Early_enriched & Pt[,4] > Early_enriched) | (Pt[,5] > Late_enriched & Pt[,6] > Late_enriched)),]
+  
+  # Whatever is seroreactive needs to have a meaningful increase in signal
+  Pt <- Pt[as.logical(Pt$EarlyDiff > 1 | Pt$LateDiff > 1),]
+  
+  Plate13_VectorScan_EnrichedOnly_results_list[[identifier]] <- Pt
+  
+  # Narrow down even further to just keep Dengue peptides 
+  Pt <- Pt[(Pt$Species == "DV"), ]
+  
+  Plate13_VectorScan_EnrichedDengueOnly_results_list[[identifier]] <- Pt
+}
+```
+
+```{r}
+identifiers <- c('I1', 'I2', 'I4')
+results_list <- list()
+
+# Depending on whatever level you want to analyze, comment out the others as appropriate 
+
+for (id in identifiers) {
+  df <- Plate13_VectorScan_EnrichedOnly_results_list[[id]]
+  
+  ## Group 
+  #percentage_table <- table(df$Group) / sum(table(df$Group)) * 100
+  #percentage_df <- as.data.frame(percentage_table)
+  #colnames(percentage_df) <- c("Group", "Percentage")
+  #percentage_df$Identifier <- id
+  
+  ## Family 
+  #percentage_table <- table(df$Family) / sum(table(df$Family)) * 100
+  #percentage_df <- as.data.frame(percentage_table)
+  #colnames(percentage_df) <- c("Family", "Percentage")
+  #percentage_df$Identifier <- id
+  
+  ## Species 
+  percentage_table <- table(df$Species) / sum(table(df$Species)) * 100
+  percentage_df <- as.data.frame(percentage_table)
+  colnames(percentage_df) <- c("Species", "Percentage")
+  percentage_df$Identifier <- id
+
+  results_list[[id]] <- percentage_df
+}
+
+combined_results <- bind_rows(results_list)
+
+print(combined_results)
+```
+
+```{r}
+View(table(VectorScan_cleaned$Species) / sum(table(VectorScan_cleaned$Species)) * 100)
+```
+
+```{r}
+combined_df <- do.call(cbind, lapply(Plate13_VectorScan_All_results_list, function(df) {
+  df[, c("Pre", "Early", "Late")]  
+}))
+
+colnames(combined_df) <- c("NHP1-Pre", "NHP1-Early", "NHP1-Late", "NHP2-Pre", "NHP2-Early", "NHP2-Late", "NHP4-Pre", "NHP4-Early", "NHP4-Late")
+cor_matrix <- cor(combined_df,combined_df, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.8, tl.col = "black", col=COL2('RdBu'))
+```
+```{r}
+# To create contingency tables and perform fisher's exact tests
+# Comment out the appropriate lines in order to get the comparisons you need
+
+identifiers <- c('I1', 'I2', 'I4')
+
+contingencies <- data.frame()
+
+for(patient in identifiers){
+  
+  #group_to_test <- "Mosquito"
+  #group_to_test <- "Pfal"
+  # group_to_test <- "Plasmodium"
+ # group_to_test <- "ZV"
+  group_to_test <- "DV"
+  #group_to_test <- "CV"
+  #group_to_test <- "Flavivirus"
+  #group_to_test <- "Anopheles"
+  
+  df <- Plate13_VectorScan_EnrichedOnly_results_list[[patient]]
+#  df3 <- df[as.logical(df$'Group' == group_to_test),]
+ # df3 <- df[as.logical(df$'Family' == group_to_test),]
+  df3 <- df[as.logical(df$'Species' == group_to_test),]
+  
+  temp1 <- nrow(df3)
+  #temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Group' == group_to_test),]) - nrow(df3)
+  #temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Family' == group_to_test),]) - nrow(df3)
+ temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Species' == group_to_test),]) - nrow(df3)
+  temp3 <- nrow(df) - nrow(df3)
+  temp4 <- nrow(VectorScan_cleaned) - temp1 - temp2 - temp3
+    
+  paste0("Num ", group_to_test, " Hits ", temp1)
+  paste0("Num ", group_to_test, " Not hits ", temp2)
+  paste0("Num Non-", group_to_test, " Hits ", temp3 )
+  paste0("Num Non-", group_to_test, " Not hits ", temp4)
+  
+  # Create a contingency table
+  contingency_table <- matrix(c(temp1, temp2,
+                               temp3, temp4),
+                              nrow = 2,
+                              byrow = TRUE)
+  
+  colnames(contingency_table) <- c("Hit", "Not hit")
+  rownames(contingency_table) <- c(group_to_test, paste0("Not ", group_to_test))
+  
+  contingencies <- rbind(contingencies, contingency_table)
+  fisher_test <- fisher.test(contingency_table)
+  
+  print(patient)
+  print(contingency_table)
+  print(fisher_test)
+}
+
+```
+
+Mapping back the hits to the DENV genome 
+
+```{r}
+VectorScan_Dengue <- VectorScan_cleaned[as.logical(VectorScan_cleaned$Species == "DV"),]
+VectorScan_Dengue_Proteins <- data.frame(unique(VectorScan_Dengue$Protein))
+
+# Create an AAStringSet object
+seqs <- AAStringSet(VectorScan_Dengue$'AA Sequence')
+  # Add names from the sequence header column
+names(seqs) <- VectorScan_Dengue$id
+writeXStringSet(seqs, filepath = "VectorScan_Dengue.faa")
+```
+
+In terminal: 
+
+makeblastdb -in DENV1.faa -out db -parse_seqids -dbtype prot
+blastp -query VectorScan_Dengue.faa -db db -outfmt 6 -max_hsps 1 -out VectorScan_Dengue1.txt
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' VectorScan_Dengue1.txt > VectorScan_Dengue1.csv
+
+makeblastdb -in DENV2.faa -out db -parse_seqids -dbtype prot
+blastp -query VectorScan_Dengue.faa -db db -outfmt 6 -max_hsps 1 -out VectorScan_Dengue2.txt
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' VectorScan_Dengue2.txt > VectorScan_Dengue2.csv
+
+makeblastdb -in DENV4.faa -out db -parse_seqids -dbtype prot
+blastp -query VectorScan_Dengue.faa -db db -outfmt 6 -max_hsps 1 -out VectorScan_Dengue4.txt
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' VectorScan_Dengue4.txt > VectorScan_Dengue4.csv
+
+```{r}
+DENV1_peptides <- read.csv('/Users/melodi/Library/CloudStorage/OneDrive-SharedLibraries-HarvardUniversity/The Antibody Observatory (ABO) - Documents/Manuscript_1/VectorScan_Dengue1.csv', header=FALSE)
+#DENV1_peptides <- DENV1_peptides[as.logical((DENV1_peptides$V8 - DENV1_peptides$V7) > 28),]
+#DENV1_peptides <- DENV1_peptides[as.logical(DENV1_peptides$V11 < 1),]
+DENV1_peptides$id <- DENV1_peptides[,1]
+DENV1_peptides$Species <- VectorScan$Species[match(DENV1_peptides$id, VectorScan$id)]
+DENV1_peptides$Protein <- VectorScan$Protein[match(DENV1_peptides$id, VectorScan$id)]
+DENV1_peptides$AA <- VectorScan$'AA Sequence'[match(DENV1_peptides$id, VectorScan$id)]
+DENV1_peptides$ForAlignment <- paste0(">", DENV1_peptides$V2, " ",DENV1_peptides$AA)
+DENV1_peptides$AANumber <- DENV1_peptides$V9  + (DENV1_peptides$V8 - DENV1_peptides$V7)/2
+
+DENV2_peptides <- read.csv('/Users/melodi/Library/CloudStorage/OneDrive-SharedLibraries-HarvardUniversity/The Antibody Observatory (ABO) - Documents/Manuscript_1/VectorScan_Dengue2.csv', header=FALSE)
+#DENV2_peptides <- DENV2_peptides[as.logical((DENV2_peptides$V8 - DENV2_peptides$V7) > 28),]
+#DENV2_peptides <- DENV2_peptides[as.logical(DENV2_peptides$V11 < 1),]
+DENV2_peptides$id <- DENV2_peptides[,1]
+DENV2_peptides$Species <- VectorScan$Species[match(DENV2_peptides$id, VectorScan$id)]
+DENV2_peptides$Protein <- VectorScan$Protein[match(DENV2_peptides$id, VectorScan$id)]
+DENV2_peptides$AA <- VectorScan$'AA Sequence'[match(DENV2_peptides$id, VectorScan$id)]
+DENV2_peptides$ForAlignment <- paste0(">", DENV2_peptides$V2, " ",DENV2_peptides$AA)
+DENV2_peptides$AANumber <- DENV2_peptides$V9  + (DENV2_peptides$V8 - DENV2_peptides$V7)/2
+
+DENV4_peptides <- read.csv('/Users/melodi/Library/CloudStorage/OneDrive-SharedLibraries-HarvardUniversity/The Antibody Observatory (ABO) - Documents/Manuscript_1/VectorScan_Dengue4.csv', header=FALSE)
+#DENV4_peptides <- DENV4_peptides[as.logical((DENV4_peptides$V8 - DENV4_peptides$V7) > 28),]
+#DENV4_peptides <- DENV4_peptides[as.logical(DENV4_peptides$V11 < 1),]
+DENV4_peptides$id <- DENV4_peptides[,1]
+DENV4_peptides$Species <- VectorScan$Species[match(DENV4_peptides$id, VectorScan$id)]
+DENV4_peptides$Protein <- VectorScan$Protein[match(DENV4_peptides$id, VectorScan$id)]
+DENV4_peptides$AA <- VectorScan$'AA Sequence'[match(DENV4_peptides$id, VectorScan$id)]
+DENV4_peptides$ForAlignment <- paste0(">", DENV4_peptides$V2, " ",DENV4_peptides$AA)
+DENV4_peptides$AANumber <- DENV4_peptides$V9  + (DENV4_peptides$V8 - DENV4_peptides$V7)/2
+
+combined_data <- full_join(DENV1_peptides, DENV2_peptides, by = 'id')
+combined_data <- full_join(combined_data, DENV4_peptides, by = 'id')
+VectorScan_Dengue_PercentIDtoSerotypes <- data.frame('id' = combined_data$id, 'DENV1_Percent' = combined_data$V3.x, 'DENV2_Percent' = combined_data$V3.y, 'DENV4_Percent' = combined_data$V3)
+write_xlsx(combined_data, "VectorScan_Dengue_PercentIDtoSerotypes.xlsx")
+```
+
+```{r}
+df1 <- DENV1_peptides
+df2 <- DENV2_peptides
+df4 <- DENV4_peptides
+
+combined_data <- bind_rows(
+  df1 %>% mutate(Source = "DENV1"),
+  df2 %>% mutate(Source = "DENV2"),
+  df4 %>% mutate(Source = "DENV4")
+)
+
+combined_data$Source <- as.factor(combined_data$Source)
+
+plot <- ggplot(combined_data, aes(x = AANumber, fill = Source)) +
+  geom_density(alpha = 0.5, adjust = 0.05) +  
+  labs(title = "Density Plot of all Dengue-derived peptides",
+       x = "AANumber",
+       y = "Density",
+       fill = "Source") +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, max(combined_data$AANumber, na.rm = TRUE), by = 100)) + 
+  scale_fill_manual(values = c("DENV1" = "#96362E", "DENV2" = "#CB713C", "DENV4" = "#A6C392")) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 114, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 280, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 775, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1127, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1345, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1475, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2093, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2220, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2243, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2491, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 3391, linetype = "dashed", color = "black", size = 0.2) +
+  theme(legend.position = c(.85, .85), 
+        panel.grid = element_blank(),
+        panel.border = element_rect(color = 'black', fill = NA, size = .25),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) 
+
+print(plot)
+```
+```{r}
+# Mapping of NHP1 to DENV1 
+
+NHP1_EarlyandLateHits <- Plate13_VectorScan_EnrichedDengueOnly_results_list[["I1"]]
+NHP1_EarlyandLateHits$NHP1 <- DENV1_peptides$V3[match(NHP1_EarlyandLateHits$id, DENV1_peptides$id)]
+NHP1_EarlyandLateHits$NHP1_AANumber <- DENV1_peptides$AANumber[match(NHP1_EarlyandLateHits$id, DENV1_peptides$id)]
+NHP1_EarlyandLateHits <- NHP1_EarlyandLateHits %>% filter(!is.na(NHP1))
+
+plot <- ggplot(NHP1_EarlyandLateHits) +
+  geom_point(aes(x = NHP1_AANumber, y = `EarlyDiff`, color = "Early hit"), alpha = 0.5, size = 1.5) + 
+  geom_point(aes(x = NHP1_AANumber, y = `LateDiff`, color = "Late hit"), alpha = 0.7, size = 1.5) +
+  scale_color_manual(values = c("Early hit" = "#96362E", "Late hit" = "#96369E", "NHP1-Pre" = "gray")) +
+  labs(title = "NHP1",
+       x = "AANumber",
+       y = "Delta FC (Post-infection - pre-infection)",
+       color = "Timepoint") +
+  theme_minimal() +
+  theme(legend.position = c(.85, .85), 
+        panel.grid = element_blank(),
+           legend.box.background = element_rect(color="black", size=0.25), 
+        panel.border = element_rect(color = 'black', fill = NA, size = .25)) +
+  # scale_y_continuous(trans = "log10") +
+     geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 114, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 280, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 775, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1127, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1345, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1475, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2093, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2220, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2243, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2491, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 3391, linetype = "dashed", color = "black", size = 0.2) 
+
+print(plot)
+
+NHP1_EarlyandLateHits$ForAlignment <- paste0(">", NHP1_EarlyandLateHits$id, " ", NHP1_EarlyandLateHits$`AA Sequence`)
+```
+```{r}
+NHP2_EarlyandLateHits <- Plate13_VectorScan_EnrichedDengueOnly_results_list[["I2"]]
+NHP2_EarlyandLateHits$NHP2 <- DENV2_peptides$V3[match(NHP2_EarlyandLateHits$id, DENV2_peptides$id)]
+NHP2_EarlyandLateHits$NHP2_AANumber <- DENV2_peptides$AANumber[match(NHP2_EarlyandLateHits$id, DENV2_peptides$id)]
+NHP2_EarlyandLateHits <- NHP2_EarlyandLateHits %>% filter(!is.na(NHP2))
+
+plot <- ggplot(NHP2_EarlyandLateHits) +
+  geom_point(aes(x = NHP2_AANumber, y = `EarlyDiff`, color = "Early hit"), alpha = 0.5, size = 1.5) + 
+  geom_point(aes(x = NHP2_AANumber, y = `LateDiff`, color = "Late hit"), alpha = 0.7, size = 1.5) +
+  scale_color_manual(values = c("Early hit" = "#CB713C", "Late hit" = "#CB719C", "DENV1-Pre" = "gray")) + 
+  labs(title = "NHP2",
+       x = "AANumber",
+       y = "Delta FC (Post-infection - pre-infection)",
+       color = "Timepoint") +
+  theme_minimal() +
+  theme(legend.position = c(.85, .85), 
+        panel.grid = element_blank(),
+           legend.box.background = element_rect(color="black", size=0.25), 
+        panel.border = element_rect(color = 'black', fill = NA, size = .25)) +
+  # scale_y_continuous(trans = "log10") +
+     geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 114, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 280, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 775, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1127, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1345, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1475, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2093, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2220, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2243, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2491, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 3391, linetype = "dashed", color = "black", size = 0.2) 
+
+print(plot)
+
+NHP2_EarlyandLateHits$ForAlignment <- paste0(">", NHP2_EarlyandLateHits$id, " ", NHP2_EarlyandLateHits$`AA Sequence`)
+```
+
+```{r}
+NHP4_EarlyandLateHits <- Plate13_VectorScan_EnrichedDengueOnly_results_list[["I4"]]
+NHP4_EarlyandLateHits$NHP4 <- DENV4_peptides$V3[match(NHP4_EarlyandLateHits$id, DENV4_peptides$id)]
+NHP4_EarlyandLateHits$NHP4_AANumber <- DENV4_peptides$AANumber[match(NHP4_EarlyandLateHits$id, DENV4_peptides$id)]
+NHP4_EarlyandLateHits <- NHP4_EarlyandLateHits %>% filter(!is.na(NHP4))
+
+plot <- ggplot(NHP4_EarlyandLateHits) +
+  geom_point(aes(x = NHP4_AANumber, y = `EarlyDiff`, color = "Early hit"), alpha = 0.5, size = 1.5) + 
+  geom_point(aes(x = NHP4_AANumber, y = `LateDiff`, color = "Late hit"), alpha = 0.7, size = 1.5) +
+  scale_color_manual(values = c("Early hit" = "#A6C392", "Late hit" = "#395E12", "DENV1-Pre" = "gray")) +
+  labs(title = "NHP4",
+       x = "AANumber",
+       y = "Delta FC (Post-infection - pre-infection)",
+       color = "Timepoint") +
+  theme_minimal() +
+  theme(legend.position = c(.85, .85), 
+        panel.grid = element_blank(),
+           legend.box.background = element_rect(color="black", size=0.25), 
+        panel.border = element_rect(color = 'black', fill = NA, size = .25)) +
+  # scale_y_continuous(trans = "log10") +
+     geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 114, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 280, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 775, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1127, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1345, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1475, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2093, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2220, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2243, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2491, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 3391, linetype = "dashed", color = "black", size = 0.2) 
+
+print(plot)
+
+NHP4_EarlyandLateHits$ForAlignment <- paste0(">", NHP4_EarlyandLateHits$id, " ", NHP4_EarlyandLateHits$`AA Sequence`)
+```
+
+```{r}
+df1 <- NHP1_EarlyandLateHits
+names(df1)[names(df1) == "NHP1_AANumber"] <- "AANumber"
+df2 <- NHP2_EarlyandLateHits
+names(df2)[names(df2) == "NHP2_AANumber"] <- "AANumber"
+df4 <- NHP4_EarlyandLateHits
+names(df4)[names(df4) == "NHP4_AANumber"] <- "AANumber"
+
+combined_data <- bind_rows(
+  df1 %>% mutate(Source = "NHP1"),
+  df2 %>% mutate(Source = "NHP2"),
+  df4 %>% mutate(Source = "NHP4")
+)
+
+combined_data$Source <- as.factor(combined_data$Source)
+
+plot <- ggplot(combined_data, aes(x = AANumber, fill = Source)) +
+  geom_density(alpha = 0.5, adjust = 0.05) +  
+  labs(title = "Density Plot of post-infection enriched peptides",
+       x = "AANumber",
+       y = "Density",
+       fill = "Source") +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, max(combined_data$AANumber, na.rm = TRUE), by = 100)) + 
+  scale_fill_manual(values = c("NHP1" = "#96362E", "NHP2" = "#CB713C", "NHP4" = "#A6C392")) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 114, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 280, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 775, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1127, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1345, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1475, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2093, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2220, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2243, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2491, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 3391, linetype = "dashed", color = "black", size = 0.2) +
+  theme(legend.position = c(.85, .85), 
+        panel.grid = element_blank(),
+        panel.border = element_rect(color = 'black', fill = NA, size = .25),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) 
+
+print(plot)
+```
+
+```{r}
+threshold <- 70
+
+cross_reactive <- VectorScan_Dengue_PercentIDtoSerotypes[as.logical(VectorScan_Dengue_PercentIDtoSerotypes$DENV1_Percent >= threshold & VectorScan_Dengue_PercentIDtoSerotypes$DENV2_Percent >= threshold & VectorScan_Dengue_PercentIDtoSerotypes$DENV4_Percent >= threshold),]
+
+DENV1_cross <- cross_reactive %>%
+    inner_join(DENV1_peptides, by = 'id') %>%
+    filter(V7 == 1, V8 == 56, !is.na(AANumber))
+
+DENV2_cross <- cross_reactive %>%
+    inner_join(DENV2_peptides, by = 'id') %>%
+    filter(V7 == 1, V8 == 56, !is.na(AANumber))
+
+DENV4_cross <- cross_reactive %>%
+    inner_join(DENV4_peptides, by = 'id') %>%
+    filter(V7 == 1, V8 == 56, !is.na(AANumber))
+
+df1 <- DENV1_cross
+df2 <- DENV2_cross
+df4 <- DENV4_cross
+
+combined_data <- bind_rows(
+  df1 %>% mutate(Source = "DENV1"),
+  df2 %>% mutate(Source = "DENV2"),
+  df4 %>% mutate(Source = "DENV4")
+)
+
+# Ensure 'Source' is a factor so that ggplot handles it as discrete
+combined_data$Source <- as.factor(combined_data$Source)
+
+# Create the density plot
+plot <- ggplot(combined_data, aes(x = AANumber, fill = Source)) +
+  geom_density(alpha = 0.5, adjust = 0.05) +  
+  labs(title = "DENV peptides with >=70% ID to each serotype",
+       x = "AANumber",
+       y = "Density",
+       fill = "Source") +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, max(combined_data$AANumber, na.rm = TRUE), by = 100)) + 
+  scale_fill_manual(values = c("DENV1" = "#96362E", "DENV2" = "#CB713C", "DENV4" = "#A6C392")) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 114, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 280, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 775, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1127, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1345, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1475, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2093, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2220, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2243, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2491, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 3391, linetype = "dashed", color = "black", size = 0.2) +
+  theme(legend.position = c(.85, .85), 
+        panel.grid = element_blank(),
+        panel.border = element_rect(color = 'black', fill = NA, size = .25),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) 
+
+print(plot)
+```
+
+Identify serotype/strain specific peptides 
+
+Benchmarking analysis: 
+
+```{r}
+for (threshold in seq(50, 100, by = 5)) {
+  
+  DENV1_Specific <- VectorScan_Dengue_PercentIDtoSerotypes
+  DENV1_Specific <- DENV1_Specific %>%
+    filter(DENV1_Percent >= threshold) %>%
+    inner_join(DENV1_peptides, by = 'id') %>%
+    filter(V7 == 1, V8 == 56, !is.na(AANumber))
+
+  df_long <- DENV1_Specific %>%
+    pivot_longer(
+      cols = c(DENV1_Percent, DENV2_Percent, DENV4_Percent),
+      names_to = "variable",
+      values_to = "value"
+    )
+
+  p <- ggplot(df_long, aes(x = variable, y = value, color = variable)) +
+    geom_boxplot(lwd=1.5, show.legend = FALSE) +
+    scale_color_manual(values = c(
+      DENV1_Percent = "#96362E",
+      DENV2_Percent = "#CB713C",
+      DENV4_Percent = "#A6C392"
+    )) +
+    theme_minimal(base_size = 28) +
+    labs(
+      title = paste("Threshold \u2265", threshold),
+      x = "Serotype",
+      y = "Percent Identity",
+      color = "Serotype"
+    )+
+    scale_x_discrete(labels=c("DENV1","DENV2","DENV4"))
+
+  print(p)
+}
+```
+
+```{r}
+for (threshold in seq(50, 100, by = 5)) {
+  
+  DENV2_Specific <- VectorScan_Dengue_PercentIDtoSerotypes
+  DENV2_Specific <- DENV2_Specific %>%
+    filter(DENV2_Percent >= threshold) %>%
+    inner_join(DENV2_peptides, by = 'id') %>%
+    filter(V7 == 1, V8 == 56, !is.na(AANumber))
+
+  df_long <- DENV2_Specific %>%
+    pivot_longer(
+      cols = c(DENV1_Percent, DENV2_Percent, DENV4_Percent),
+      names_to = "variable",
+      values_to = "value"
+    )
+
+  p <- ggplot(df_long, aes(x = variable, y = value, color = variable)) +
+    geom_boxplot(lwd=1.5, show.legend = FALSE) +
+    scale_color_manual(values = c(
+      DENV1_Percent = "#96362E",
+      DENV2_Percent = "#CB713C",
+      DENV4_Percent = "#A6C392"
+    )) +
+    theme_minimal(base_size = 28) +
+    labs(
+      title = paste("Threshold \u2265", threshold),
+      x = "Serotype",
+      y = "Percent Identity",
+      color = "Serotype"
+    )+
+    scale_x_discrete(labels=c("DENV1","DENV2","DENV4"))
+
+  print(p)
+}
+```
+
+```{r}
+for (threshold in seq(50, 100, by = 5)) {
+  
+  # Step 1: Filter data
+  DENV4_Specific <- VectorScan_Dengue_PercentIDtoSerotypes
+  DENV4_Specific <- DENV4_Specific %>%
+    filter(DENV4_Percent >= threshold) %>%
+    inner_join(DENV4_peptides, by = 'id') %>%
+    filter(V7 == 1, V8 == 56, !is.na(AANumber))
+
+  df_long <- DENV4_Specific %>%
+    pivot_longer(
+      cols = c(DENV1_Percent, DENV2_Percent, DENV4_Percent),
+      names_to = "variable",
+      values_to = "value"
+    )
+
+  p <- ggplot(df_long, aes(x = variable, y = value, color = variable)) +
+    geom_boxplot(lwd=1.5, show.legend = FALSE) +
+    scale_color_manual(values = c(
+      DENV1_Percent = "#96362E",
+      DENV2_Percent = "#CB713C",
+      DENV4_Percent = "#A6C392"
+    )) +
+    theme_minimal(base_size = 28) +
+    labs(
+      title = paste("Threshold \u2265", threshold),
+      x = "Serotype",
+      y = "Percent Identity",
+      color = "Serotype"
+    )+
+    scale_x_discrete(labels=c("DENV1","DENV2","DENV4"))
+
+  print(p) 
+}
+```
+
+For the winning benchmarks (>85% to 1 strain and <80% to the others) 
+
+```{r}
+DENV1_Specific <- inner_join(VectorScan_Dengue_PercentIDtoSerotypes, DENV1_peptides, by = 'id')
+DENV1_Specific <- DENV1_Specific[as.logical(DENV1_Specific$V7 == 1 & DENV1_Specific$V8 == 56),]
+DENV1_Specific <- DENV1_Specific[as.logical(DENV1_Specific$DENV1_Percent >= 85 & DENV1_Specific$DENV2_Percent < 80 & DENV1_Specific$DENV4_Percent < 80),]
+DENV1_Specific <- DENV1_Specific %>%  filter(!is.na(AANumber))
+
+df_long <- DENV1_Specific %>%
+  pivot_longer(
+    cols = c(DENV1_Percent, DENV2_Percent, DENV4_Percent),
+    names_to = "variable",
+    values_to = "value"
+  )
+
+p <- ggplot(df_long, aes(x = variable, y = value, color = variable)) +
+  geom_boxplot() +
+  scale_color_manual(values = c(
+    DENV1_Percent = "#96362E",
+    DENV2_Percent = "#CB713C",
+    DENV4_Percent = "#A6C392"
+  )) +
+  theme_minimal() +
+  labs(
+    title = paste("% Identity to each strain among 'DENV1-specific' peptides"),
+    x = "Serotype",
+    y = "Percent Identity",
+    color = "Serotype"
+  )
+
+print(p)  
+
+DENV2_Specific <- inner_join(VectorScan_Dengue_PercentIDtoSerotypes, DENV2_peptides, by = 'id')
+DENV2_Specific <- DENV2_Specific[as.logical(DENV2_Specific$V7 == 1 & DENV2_Specific$V8 == 56),]
+DENV2_Specific <- DENV2_Specific[as.logical(DENV2_Specific$DENV1_Percent < 80 & DENV2_Specific$DENV2_Percent >= 85 & DENV2_Specific$DENV4_Percent < 80),]
+DENV2_Specific <- DENV2_Specific %>%  filter(!is.na(AANumber))
+
+df_long <- DENV2_Specific %>%
+  pivot_longer(
+    cols = c(DENV1_Percent, DENV2_Percent, DENV4_Percent),
+    names_to = "variable",
+    values_to = "value"
+  )
+
+p <- ggplot(df_long, aes(x = variable, y = value, color = variable)) +
+  geom_boxplot() +
+  scale_color_manual(values = c(
+    DENV1_Percent = "#96362E",
+    DENV2_Percent = "#CB713C",
+    DENV4_Percent = "#A6C392"
+  )) +
+  theme_minimal() +
+  labs(
+    title = paste("% Identity to each strain among 'DENV2-specific' peptides"),
+    x = "Serotype",
+    y = "Percent Identity",
+    color = "Serotype"
+  )
+
+print(p)
+
+DENV4_Specific <- inner_join(VectorScan_Dengue_PercentIDtoSerotypes, DENV4_peptides, by = 'id')
+DENV4_Specific <- DENV4_Specific[as.logical(DENV4_Specific$V7 == 1 & DENV4_Specific$V8 == 56),]
+DENV4_Specific <- DENV4_Specific[as.logical(DENV4_Specific$DENV1_Percent < 80 & DENV4_Specific$DENV2_Percent < 80 & DENV4_Specific$DENV4_Percent >= 85),]
+DENV4_Specific <- DENV4_Specific %>%  filter(!is.na(AANumber))
+
+df_long <- DENV4_Specific %>%
+  pivot_longer(
+    cols = c(DENV1_Percent, DENV2_Percent, DENV4_Percent),
+    names_to = "variable",
+    values_to = "value"
+  )
+
+p <- ggplot(df_long, aes(x = variable, y = value, color = variable)) +
+  geom_boxplot() +
+  scale_color_manual(values = c(
+    DENV1_Percent = "#96362E",
+    DENV2_Percent = "#CB713C",
+    DENV4_Percent = "#A6C392"
+  )) +
+  theme_minimal() +
+  labs(
+    title = paste("% Identity to each strain among 'DENV4-specific' peptides"),
+    x = "Serotype",
+    y = "Percent Identity",
+    color = "Serotype"
+  )
+
+print(p)  
+```
+
+```{r}
+Strain_Specific <- rbind(DENV1_Specific, DENV2_Specific, DENV4_Specific)
+  
+Strain_Specific <- Strain_Specific[!apply(Strain_Specific, 1, function(x) all(is.na(x))), ]
+Strain_Specific[is.na(Strain_Specific)] <- 0
+
+write_xlsx(Strain_Specific, "Strain_Specific.xlsx")
+```
+
+```{r}
+Strain_Specific <- read_xlsx("Strain_Specific.xlsx")
+```
+
+```{r}
+df1 <- DENV1_Specific
+df2 <- DENV2_Specific
+df4 <- DENV4_Specific
+
+combined_data <- bind_rows(
+  df1 %>% mutate(Source = "DENV1"),
+  df2 %>% mutate(Source = "DENV2"),
+  df4 %>% mutate(Source = "DENV4")
+)
+
+# Ensure 'Source' is a factor so that ggplot handles it as discrete
+combined_data$Source <- as.factor(combined_data$Source)
+
+# Create the density plot
+plot <- ggplot(combined_data, aes(x = AANumber, fill = Source)) +
+  geom_density(alpha = 0.5, adjust = 0.05) +  
+  labs(title = "Density Plot of all strain-specific peptides",
+       x = "AANumber",
+       y = "Density",
+       fill = "Source") +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0, max(combined_data$AANumber, na.rm = TRUE), by = 100)) + 
+  scale_fill_manual(values = c("DENV1" = "#96362E", "DENV2" = "#CB713C", "DENV4" = "#A6C392")) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 114, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 280, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 775, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1127, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1345, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 1475, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2093, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2220, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2243, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 2491, linetype = "dashed", color = "black", size = 0.2) + 
+  geom_vline(xintercept = 3391, linetype = "dashed", color = "black", size = 0.2) +
+  theme(legend.position = c(.85, .85), 
+        panel.grid = element_blank(),
+        panel.border = element_rect(color = 'black', fill = NA, size = .25),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) 
+
+print(plot)
+```
+
+```{r}
+NHP1_Hits <- Plate13_VectorScan_EnrichedDengueOnly_results_list[["I1"]]
+NHP1_Hits <- inner_join(NHP1_Hits, VectorScan_Dengue_PercentIDtoSerotypes, by = 'id')
+
+NHP2_Hits <- Plate13_VectorScan_EnrichedDengueOnly_results_list[["I2"]]
+NHP2_Hits <- inner_join(NHP2_Hits, VectorScan_Dengue_PercentIDtoSerotypes, by = 'id')
+
+NHP4_Hits <- Plate13_VectorScan_EnrichedDengueOnly_results_list[["I4"]]
+NHP4_Hits <- inner_join(NHP4_Hits, VectorScan_Dengue_PercentIDtoSerotypes, by = 'id')
+
+venn_list <- list(
+  NHP1 = NHP1_Hits$id,
+  NHP2 = NHP2_Hits$id,
+  NHP4 = NHP4_Hits$id
+)
+
+ggvenn(venn_list, fill_color = c("#96362E", "#CB713C", "#A6C392"))
+```
+```{r}
+ids1 <- NHP1_Hits$id
+ids2 <- NHP2_Hits$id
+ids4 <- NHP4_Hits$id
+
+unique_to_1 <- setdiff(ids1, union(ids2, ids4))
+unique_to_2 <- setdiff(ids2, union(ids1, ids4))
+unique_to_4 <- setdiff(ids4, union(ids1, ids2))
+
+NHP1_unique_hits <- NHP1_Hits[NHP1_Hits$id %in% unique_to_1, ]
+NHP2_unique_hits <- NHP2_Hits[NHP2_Hits$id %in% unique_to_2, ]
+NHP4_unique_hits <- NHP4_Hits[NHP4_Hits$id %in% unique_to_4, ]
+```
+
+```{r}
+temp1 <- sum(NHP1_unique_hits$DENV1_Percent >= 85 & NHP1_unique_hits$DENV2_Percent < 80 & NHP1_unique_hits$DENV4_Percent < 80)
+temp2 <- sum(Strain_Specific$DENV1_Percent >= 85) - temp1
+temp3 <- nrow(NHP1_unique_hits) - temp1
+temp4 <- nrow(VectorScan_Dengue_PercentIDtoSerotypes) - temp1 - temp2 - temp3
+
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c("DENV1-Specific", paste0("Not DENV1-Specific"))
+
+contingencies <- rbind(contingencies, contingency_table)
+fisher_test <- fisher.test(contingency_table)
+
+print(contingency_table)
+print(fisher_test)
+
+temp1 <- sum(NHP1_unique_hits$DENV1_Percent < 80 & NHP1_unique_hits$DENV2_Percent >= 85 & NHP1_unique_hits$DENV4_Percent < 80)
+temp2 <- sum(Strain_Specific$DENV2_Percent >= 85) - temp1
+temp3 <- nrow(NHP1_unique_hits) - temp1
+temp4 <- nrow(VectorScan_Dengue_PercentIDtoSerotypes) - temp1 - temp2 - temp3
+
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c("DENV2-Specific", paste0("Not DENV2-Specific"))
+
+contingencies <- rbind(contingencies, contingency_table)
+fisher_test <- fisher.test(contingency_table)
+
+print(contingency_table)
+print(fisher_test)
+  
+temp1 <- sum(NHP1_unique_hits$DENV1_Percent < 80 & NHP1_unique_hits$DENV2_Percent < 80 & NHP1_unique_hits$DENV4_Percent >= 85)
+temp2 <- sum(Strain_Specific$DENV4_Percent >= 85) - temp1
+temp3 <- nrow(NHP1_unique_hits) - temp1
+temp4 <- nrow(VectorScan_Dengue_PercentIDtoSerotypes) - temp1 - temp2 - temp3
+
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c("DENV4-Specific", paste0("Not DENV4-Specific"))
+
+contingencies <- rbind(contingencies, contingency_table)
+fisher_test <- fisher.test(contingency_table)
+
+print(contingency_table)
+print(fisher_test)
+
+```
+```{r}
+temp1 <- sum(NHP2_unique_hits$DENV1_Percent >= 85 & NHP2_unique_hits$DENV2_Percent < 80 & NHP2_unique_hits$DENV4_Percent < 80)
+temp2 <- sum(Strain_Specific$DENV1_Percent >= 85) - temp1
+temp3 <- nrow(NHP2_unique_hits) - temp1
+temp4 <- nrow(VectorScan_Dengue_PercentIDtoSerotypes) - temp1 - temp2 - temp3
+
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c("DENV1-Specific", paste0("Not DENV1-Specific"))
+
+contingencies <- rbind(contingencies, contingency_table)
+fisher_test <- fisher.test(contingency_table)
+
+print(contingency_table)
+print(fisher_test)
+
+temp1 <- sum(NHP2_unique_hits$DENV1_Percent < 80 & NHP2_unique_hits$DENV2_Percent >= 85 & NHP2_unique_hits$DENV4_Percent < 80)
+temp2 <- sum(Strain_Specific$DENV2_Percent >= 85) - temp1
+temp3 <- nrow(NHP2_unique_hits) - temp1
+temp4 <- nrow(VectorScan_Dengue_PercentIDtoSerotypes) - temp1 - temp2 - temp3
+
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c("DENV2-Specific", paste0("Not DENV2-Specific"))
+
+contingencies <- rbind(contingencies, contingency_table)
+fisher_test <- fisher.test(contingency_table)
+
+print(contingency_table)
+print(fisher_test)
+  
+temp1 <- sum(NHP2_unique_hits$DENV1_Percent < 80 & NHP2_unique_hits$DENV2_Percent < 80 & NHP2_unique_hits$DENV4_Percent >= 85)
+temp2 <- sum(Strain_Specific$DENV4_Percent >= 85) - temp1
+temp3 <- nrow(NHP2_unique_hits) - temp1
+temp4 <- nrow(VectorScan_Dengue_PercentIDtoSerotypes) - temp1 - temp2 - temp3
+
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c("DENV4-Specific", paste0("Not DENV4-Specific"))
+
+contingencies <- rbind(contingencies, contingency_table)
+fisher_test <- fisher.test(contingency_table)
+
+print(contingency_table)
+print(fisher_test)
+
+```
+
+```{r}
+temp1 <- sum(NHP4_unique_hits$DENV1_Percent >= 85 & NHP4_unique_hits$DENV2_Percent < 80 & NHP4_unique_hits$DENV4_Percent < 80)
+temp2 <- sum(Strain_Specific$DENV1_Percent >= 85) - temp1
+temp3 <- nrow(NHP4_unique_hits) - temp1
+temp4 <- nrow(VectorScan_Dengue_PercentIDtoSerotypes) - temp1 - temp2 - temp3
+
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c("DENV1-Specific", paste0("Not DENV1-Specific"))
+
+contingencies <- rbind(contingencies, contingency_table)
+fisher_test <- fisher.test(contingency_table)
+
+print(contingency_table)
+print(fisher_test)
+
+temp1 <- sum(NHP4_unique_hits$DENV1_Percent < 80 & NHP4_unique_hits$DENV2_Percent >= 85 & NHP4_unique_hits$DENV4_Percent < 80)
+temp2 <- sum(Strain_Specific$DENV2_Percent >= 85) - temp1
+temp3 <- nrow(NHP4_unique_hits) - temp1
+temp4 <- nrow(VectorScan_Dengue_PercentIDtoSerotypes) - temp1 - temp2 - temp3
+
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c("DENV2-Specific", paste0("Not DENV2-Specific"))
+
+contingencies <- rbind(contingencies, contingency_table)
+fisher_test <- fisher.test(contingency_table)
+
+print(contingency_table)
+print(fisher_test)
+  
+temp1 <- sum(NHP4_unique_hits$DENV1_Percent < 80 & NHP4_unique_hits$DENV2_Percent < 80 & NHP4_unique_hits$DENV4_Percent >= 85)
+temp2 <- sum(Strain_Specific$DENV4_Percent >= 85) - temp1
+temp3 <- nrow(NHP4_unique_hits) - temp1
+temp4 <- nrow(VectorScan_Dengue_PercentIDtoSerotypes) - temp1 - temp2 - temp3
+
+contingency_table <- matrix(c(temp1, temp2,
+                             temp3, temp4),
+                            nrow = 2,
+                            byrow = TRUE)
+
+colnames(contingency_table) <- c("Hit", "Not hit")
+rownames(contingency_table) <- c("DENV4-Specific", paste0("Not DENV4-Specific"))
+
+contingencies <- rbind(contingencies, contingency_table)
+fisher_test <- fisher.test(contingency_table)
+
+print(contingency_table)
+print(fisher_test)
+
+```
+
+```{r}
+NHP1_DENV1 <- NHP1_unique_hits[as.logical(NHP1_unique_hits$DENV1_Percent >= 85 & NHP1_unique_hits$DENV2_Percent < 80 & NHP1_unique_hits$DENV4_Percent < 80),]
+NHP1_DENV1$NHP1_AANumber <- DENV1_peptides$AANumber[match(NHP1_DENV1$id, DENV1_peptides$id)]
+
+NHP2_DENV2 <- NHP2_unique_hits[as.logical(NHP2_unique_hits$DENV1_Percent < 80 & NHP2_unique_hits$DENV2_Percent >= 85 & NHP2_unique_hits$DENV4_Percent < 80),]
+NHP2_DENV2$NHP2_AANumber <- DENV2_peptides$AANumber[match(NHP2_DENV2$id, DENV2_peptides$id)]
+
+NHP4_DENV4 <- NHP4_unique_hits[as.logical(NHP4_unique_hits$DENV1_Percent < 80 & NHP4_unique_hits$DENV2_Percent < 80 & NHP4_unique_hits$DENV4_Percent >= 85),]
+NHP4_DENV4$NHP4_AANumber <- DENV4_peptides$AANumber[match(NHP4_DENV4$id, DENV4_peptides$id)]
+```

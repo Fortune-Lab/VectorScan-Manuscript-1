@@ -1,0 +1,351 @@
+```{r}
+# Load relevant libraries 
+library(Biostrings)
+library('dplyr')
+library('corrplot')
+library('writexl')
+library('readxl')
+library('seqinr')
+library(ggplot2)
+library(gridExtra)
+library(ggfortify)
+library(pheatmap)
+library(Biostrings)
+library(tidyverse)
+library(igraph)
+library(RColorBrewer)
+```
+
+```{r}
+OrthoMCL_originalsearch <- read_excel("OrthoMCL_originalsearch.xlsx")
+
+OrthoMCL_Sequenceinfo <- read_excel("2025_04_02_OrthoMCL.xlsx")
+
+VectorBase_results <- as.data.frame(read_excel('VectorBase_results.xlsx'))
+```
+
+```{r}
+# To be able to map everything back to the descriptions used in VectorScan, we started with the original query list 
+Protein_annotations <- OrthoMCL_originalsearch
+
+# Then we merged the OrthoMCL output with this list to get the OrthoMCL Group information
+Protein_annotations <- inner_join(Protein_annotations, OrthoMCL_Sequenceinfo, by = "Gene ID")
+
+# Then we merged that with the VectorBase output to get the protein annotations
+Protein_annotations <- inner_join(Protein_annotations, VectorBase_results, by = "Gene ID")
+```
+
+```{r}
+column_index <- which(names(Protein_annotations) == "Interpro ID")
+```
+
+```{r}
+# Find the number of proteins with no associated annotations 
+count_na_rows <- sum(apply(Protein_annotations[, 24:51], 1, function(x) all(x == "N/A")))
+
+# Print the result
+print(count_na_rows)
+```
+
+```{r}
+# Find the number of peptides from each ortholog group that do/don't have annotations
+# You can then go through them and see which peptides in the group are probably related but don't have annotations 
+
+ortho_na_summary <- Protein_annotations %>%
+  group_by(`Group ID`) %>%
+  summarise(
+    na_count = sum(`Interpro ID` == "N/A", na.rm = TRUE),       # Count of "N/A"
+    non_na_count = sum(`Interpro ID` != "N/A", na.rm = TRUE)    # Count of non-"N/A"
+  ) %>%
+  arrange(desc(na_count))  # Optionally order by "N/A" count
+
+View(ortho_na_summary)
+
+sum(ortho_na_summary$na_count)
+```
+
+```{r}
+# Manual annotatin of Interpro annoations based on ortholog group 
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_119841" & `Interpro ID` == "N/A", "IPR037645", `Interpro ID`
+    )
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_105989" & `Interpro ID` == "N/A", "IPR007657", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_106574" & `Interpro ID` == "N/A", "IPR010512", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_124395" & `Interpro ID` == "N/A", "IPR019594", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_316090" & `Interpro ID` == "N/A", "IPR017262", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_111664" & `Interpro ID` == "N/A", "IPR017262", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_163412" & `Interpro ID` == "N/A", "IPR001611", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_150656" & `Interpro ID` == "N/A", "IPR036272", `Interpro ID`)
+  )
+
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_142201" & `Interpro ID` == "N/A", "IPR002656", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_106108" & `Interpro ID` == "N/A", "IPR000618", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_132605" & `Interpro ID` == "N/A", "IPR001254", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_124170" & `Interpro ID` == "N/A", "IPR001245", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_126262" & `Interpro ID` == "N/A", "IPR022727", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_100031" & `Interpro ID` == "N/A", "IPR001254", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_114588" & `Interpro ID` == "N/A", "IPR001590", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_129091" & `Interpro ID` == "N/A", "IPR000618", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_126043" & `Interpro ID` == "N/A", "IPR011694", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_109190" & `Interpro ID` == "N/A", "IPR010512", `Interpro ID`)
+  )
+
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_107583" & `Interpro ID` == "N/A", "IPR006644", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_126662" & `Interpro ID` == "N/A", "IPR032059", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_136469" & `Interpro ID` == "N/A", "IPR036728", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_315679" & `Interpro ID` == "N/A", "IPR036084", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_150947" & `Interpro ID` == "N/A", "IPR001254", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_163406" & `Interpro ID` == "N/A", "IPR001611", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_120804" & `Interpro ID` == "N/A", "IPR032104", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_129221" & `Interpro ID` == "N/A", "IPR002656", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_106328" & `Interpro ID` == "N/A", "IPR000618", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_163256" & `Interpro ID` == "N/A", "IPR017262", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_122687" & `Interpro ID` == "N/A", "IPR026135", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_163257" & `Interpro ID` == "N/A", "IPR050975", `Interpro ID`)
+  )
+
+Protein_annotations <- Protein_annotations %>%
+  mutate(
+    `Interpro ID` = ifelse(
+      `Group ID` == "OG6_315980" & `Interpro ID` == "N/A", "IPR004019", `Interpro ID`)
+  )
+```
+
+```{r}
+ortho_na_summary <- Protein_annotations %>%
+  group_by(`Group ID`) %>%
+  summarise(
+    na_count = sum(`Interpro ID` == "N/A", na.rm = TRUE),       # Count of "N/A"
+    non_na_count = sum(`Interpro ID` != "N/A", na.rm = TRUE)    # Count of non-"N/A"
+  ) %>%
+  arrange(desc(na_count))  # Optionally order by "N/A" count
+
+View(ortho_na_summary)
+
+sum(ortho_na_summary$na_count)
+```
+
+```{r}
+# Find the number of proteins with no associated annotations 
+
+# Assuming `df` is your dataframe
+count_na_rows <- sum(apply(Protein_annotations[, 24:51], 1, function(x) all(x == "N/A")))
+
+# Print the result
+print(count_na_rows)
+```
+
+
+
+```{r}
+#Then we need to map the protein annotation information back to the peptides in the library 
+
+# Create a copy to modify
+VectorScan_updated <- VectorScan
+
+# Iterate over each row in Protein_annotations
+for(i in 1:nrow(Protein_annotations)) {
+#for(i in 1:100) {
+  # Get the current Query sequence id
+  query_id <- Protein_annotations$`Query sequence id`[i]
+  
+  # Use str_detect to find matching descriptions
+  matches <- str_detect(VectorScan_updated$Description, fixed(query_id))
+  
+  # Add columns from the matching Protein_annotations row to VectorScan_updated
+  if(any(matches)) {
+    for(col_name in names(Protein_annotations)) {
+      if(col_name != "Query sequence id") {
+        new_col_name <- paste0(col_name, "_from_Protein")
+        if(!new_col_name %in% names(VectorScan_updated)) {
+          VectorScan_updated[[new_col_name]] <- NA
+        }
+        VectorScan_updated[matches, new_col_name] <- Protein_annotations[i, col_name]
+      }
+    }
+  }
+}
+```
+
+```{r}
+VectorScan_updated_Mosquito <- VectorScan_updated[as.logical(VectorScan_updated$Group == "Mosquito"),]
+temp <- data.frame(id = VectorScan_cleaned$id)
+VectorScan_updated_Mosquito <- inner_join(temp, VectorScan_updated_Mosquito, by = 'id')
+VectorScan_updated_Mosquito[] <- lapply(VectorScan_updated_Mosquito, function(col) {
+  replace(col, is.na(col), "N/A")
+})
+write_xlsx(VectorScan_updated_Mosquito, "VectorScan_updated_Mosquito.xlsx")
+```
+
+```{r}
+# The code above takes a long time to run, so once you have this list made you can re-upload it here to avoid having to re-run the whole script after closing R 
+VectorScan_updated_Mosquito <- read_xlsx('VectorScan_updated_Mosquito.xlsx')
+```
+
+```{r}
+which(names(VectorScan_updated_Mosquito) == "Interpro ID_from_Protein")
+
+# Find the number of peptides with no associated annotations 
+
+# Assuming `df` is your dataframe
+count_na_rows <- sum(apply(VectorScan_updated_Mosquito[, 33:60], 1, function(x) all(x == "N/A")))
+
+# Print the result
+print(count_na_rows)
+print(1-count_na_rows/nrow(VectorScan_updated_Mosquito))
+print(nrow(VectorScan_updated_Mosquito) - count_na_rows)
+```
+
+```{r}
+VectorScan_updated_Mosquito_InterPro_expanded <- VectorScan_updated_Mosquito %>%
+  separate_rows('Interpro ID_from_Protein', sep = ";") %>%  # split at semicolon
+  separate_rows('Interpro ID_from_Protein', sep = ",") %>%  # further split at commas if any
+  mutate('Interpro ID_from_Protein' = replace_na(`Interpro ID_from_Protein`, "N/A"))  # Replace NA with "N/A"
+VectorScan_updated_Mosquito_InterPro_expanded$id <- as.numeric(VectorScan_updated_Mosquito_InterPro_expanded$id)
+```

@@ -1,0 +1,762 @@
+Language: R/bash
+Purpose: ANALYSIS OF NIH DATA (PLATES 14 AND 15)
+Written by: Melodi Anahtar 
+Last updated: 7/14/25
+
+```{r}
+# Load relevant libraries 
+library(Biostrings)
+library('dplyr')
+library('corrplot')
+library('writexl')
+library('readxl')
+library('seqinr')
+library(ggplot2)
+library(gridExtra)
+library(ggfortify)
+library(pheatmap)
+library(Biostrings)
+library(tidyverse)
+library(igraph)
+library(RColorBrewer)
+```
+
+Plate 14: 
+
+To demultiplex the raw fastq reads for each sample:
+
+1. Cut off the first part so that only the actual peptide part is there:
+for fq in *.fastq.gz; do cutadapt -g TCCAGTCAGGTGTGATGCTCGGGGATCCAGGAATTCGGAGCGGT -o ${fq%%.*}.cut.fastq.gz $fq; done 
+
+With this run, that results in a peptide that is 84 bp long, so make a bowtie index that contains the first 84 bp of each peptide 
+
+2. Make a bowtie index that contains the first 84 bp of each peptide 
+
+```{r}
+setwd('set the relevant path here')
+VectorScan <- read_xlsx("VectorScan_Library_1_2.xlsx") # Replace with the appropriate file name that contains the library info
+
+Bowtie_84bp_fasta <- data.frame(id = VectorScan$id, Seq = substr(VectorScan$'DNA Sequence', 1, 84))
+
+# Create an AAStringSet object
+seqs <- AAStringSet(Bowtie_84bp_fasta$Seq)
+  # Add names from the sequence header column
+names(seqs) <- paste0(Bowtie_84bp_fasta$id)
+writeXStringSet(seqs, filepath ="VectorScan_Bowtie_84bp.fasta")
+```
+
+3. Make the bowtie2 index: 
+bowtie2-build -f VectorScan_Bowtie_84bp.fasta VectorScan_84bp
+
+4. Perform the alignment: 
+for fq in *.cut.fastq.gz; do bowtie2 -x VectorScan_84bp --very-sensitive -U $fq -S ${fq%%.*}.sam; done
+
+5. Turn the .sam files into count files
+for i in *.sam; do samtools view -bS $i > ${i%.*}.bam; done
+for i in *.bam; do samtools sort $i -o ${i%.*}.sorted.bam; done
+for i in *.sorted.bam; do samtools index $i; done
+for i in *.sorted.bam; do samtools idxstats $i | cut -f 1,3 | gsed -e'/^\*\t/d' -e'1 i id\t'${i%%.*}| tr "\\t" "," > ${i%%.*}.count.csv; done
+
+6. Put all the count files together into one big table 
+paste -d ',' *.count.csv >2024_11_05_VectorScan_Plate14_Round1_counts.csv
+
+7. Clean up the counts based on replicates being consistent enough / high enough sequencing depth
+```{r}
+# Read in the counts file. This is the file after de-multiplexing the fastq's. Each column is a replicate, each row is a peptide in the library.
+Plate14_Round1_counts <- read.csv("2024_11_05_VectorScan_Plate14_Round1_counts.csv")
+cols_to_remove <- grepl("id", names(Plate14_Round1_counts))
+Plate14_Round1_counts_cleaned <- Plate14_Round1_counts[, !cols_to_remove]
+
+#Remove samples with fewer than 500,000 counts (to get ~2x coverage of the library)
+cols_to_remove <- names(Plate14_Round1_counts_cleaned[colSums(Plate14_Round1_counts_cleaned) < 500000])
+Plate14_Round1_counts_cleaned <- Plate14_Round1_counts_cleaned[, !(names(Plate14_Round1_counts_cleaned) %in% cols_to_remove)]
+
+colnames(Plate14_Round1_counts_cleaned) <- make.unique(c('NIH75-0','NIH75-0','NIH75-44','NIH75-44','NIH83-0','NIH83-0','NIH83-44','NIH83-44','PBS','NIH76-0','NIH76-0','NIH76-44','NIH76-44','NIH84-0','NIH84-0','NIH84-44','NIH84-44','PBS','NIH77-0','NIH77-0','NIH77-44','NIH77-44','NIH85-0','NIH85-0','NIH85-44','NIH85-44','PBS','NIH78-0','NIH78-0','NIH78-44','NIH78-44','NIH86-0','NIH86-0','NIH86-44','NIH86-44','PBS','NIH79-0','NIH79-0','NIH79-44','NIH79-44','NIH89-0','NIH89-0','NIH89-44','NIH89-44','PBS','NIH80-0','NIH80-0','NIH80-44','NIH80-44','NIH92-0','NIH92-0','NIH92-44','NIH92-44','PBS','NIH81-0','NIH81-0','NIH81-44','NIH81-44','PBS','NIH82-0','NIH82-0','NIH82-44','NIH82-44','PBS'))
+
+Plate14_Round1_counts_cleaned <- Plate14_Round1_counts_cleaned[, order(names(Plate14_Round1_counts_cleaned))]
+
+cor_matrix <- cor(Plate14_Round1_counts_cleaned,Plate14_Round1_counts_cleaned, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+
+#Remove samples with poorly correlated replicates (R^2 < 0.6) or no replicate at all (e.g. 64.44)
+cols_to_remove <- grepl("78|79|85", names(Plate14_Round1_counts_cleaned))
+Plate14_Round1_counts_cleaned <- Plate14_Round1_counts_cleaned[, !cols_to_remove]
+
+cor_matrix <- cor(Plate14_Round1_counts_cleaned,Plate14_Round1_counts_cleaned, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+Plate 15: 
+
+To demultiplex the raw fastq reads:
+
+In terminal: 
+cd [[path here to the folder containing the approrpiate fastq files]]
+
+Cut off the first part so that only the actual peptide part is there:
+for fq in *.fastq.gz; do cutadapt -g TCCAGTCAGGTGTGATGCTCGGGGATCCAGGAATTCGGAGCGGT -o ${fq%%.*}.cut.fastq.gz $fq; done 
+
+With this run, that results in a peptide that is 84 bp long, so make a bowtie index that contains the first 84 bp of each peptide 
+
+```{r}
+Bowtie_84bp_fasta <- data.frame(id = VectorScan$id, Seq = substr(VectorScan$'DNA Sequence', 1, 84))
+
+# Create an AAStringSet object
+seqs <- AAStringSet(Bowtie_84bp_fasta$Seq)
+  # Add names from the sequence header column
+names(seqs) <- paste0(Bowtie_84bp_fasta$id)
+writeXStringSet(seqs, filepath ="VectorScan_Bowtie_84bp.fasta")
+```
+
+Make the bowtie2 index: 
+bowtie2-build -f VectorScan_Bowtie_84bp.fasta VectorScan_84bp
+
+Perform the alignment: 
+for fq in *.cut.fastq.gz; do bowtie2 -x VectorScan_84bp --very-sensitive -U $fq -S ${fq%%.*}.sam; done
+
+Turn into count files
+for i in *.sam; do samtools view -bS $i > ${i%.*}.bam; done
+for i in *.bam; do samtools sort $i -o ${i%.*}.sorted.bam; done
+for i in *.sorted.bam; do samtools index $i; done
+for i in *.sorted.bam; do samtools idxstats $i | cut -f 1,3 | gsed -e'/^\*\t/d' -e'1 i id\t'${i%%.*}| tr "\\t" "," > ${i%%.*}.count.csv; done
+
+paste -d ',' *.count.csv >2024_11_05_VectorScan_Plate15_Round1_counts.csv
+
+PLATE 15 -- ROUND 1 - Starting counts
+```{r}
+# Read in the counts file. This is the file after de-multiplexing the fastq's. Each column is a replicate, each row is a peptide in the library.
+Plate15_Round1_counts <- read.csv("2024_11_05_VectorScan_Plate15_Round1_counts.csv") 
+cols_to_remove <- grepl("id", names(Plate15_Round1_counts))
+Plate15_Round1_counts_cleaned <- Plate15_Round1_counts[, !cols_to_remove]
+
+colnames(Plate15_Round1_counts_cleaned) <- make.unique(c('NIH60-0','NIH60-0','NIH60-44','NIH60-44','NIH69-0','NIH69-0','NIH69-44','NIH69-44','PBS','NIH61-0','NIH61-0','NIH61-44','NIH61-44','NIH70-0','NIH70-0','NIH70-44','NIH70-44','PBS','NIH62-0','NIH62-0','NIH62-44','NIH62-44','NIH71-0','NIH71-0','NIH71-44','NIH71-44','PBS','NIH63-0','NIH63-0','NIH63-44','NIH63-44','NIH73-0','NIH73-0','NIH73-44','NIH73-44','PBS','NIH64-0','NIH64-0','NIH64-44','NIH64-44','NIH88-0','NIH88-0','NIH88-44','NIH88-44','PBS','NIH65-0','NIH65-0','NIH65-44','NIH65-44','NIH90-0','NIH90-0','NIH90-44','NIH90-44','PBS','NIH66-0','NIH66-0','NIH66-44','NIH66-44','NIH94-0','NIH94-0','NIH94-44','NIH94-44','PBS','NIH68-0','NIH68-0','NIH68-44','NIH68-44','PBS'))
+
+#Remove samples with fewer than 500,000 counts (to get ~2x coverage of the library)
+cols_to_remove <- names(Plate15_Round1_counts_cleaned[colSums(Plate15_Round1_counts_cleaned) < 500000])
+Plate15_Round1_counts_cleaned <- Plate15_Round1_counts_cleaned[, !(names(Plate15_Round1_counts_cleaned) %in% cols_to_remove)]
+
+Plate15_Round1_counts_cleaned <- Plate15_Round1_counts_cleaned[, order(names(Plate15_Round1_counts_cleaned))]
+
+cor_matrix <- cor(Plate15_Round1_counts_cleaned,Plate15_Round1_counts_cleaned, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+
+#Remove samples with poorly correlated replicates (R^2 < 0.6) or no replicate at all (e.g. 64.44)
+cols_to_remove <- grepl("64|65|70", names(Plate15_Round1_counts_cleaned))
+Plate15_Round1_counts_cleaned <- Plate15_Round1_counts_cleaned[, !cols_to_remove]
+
+cor_matrix <- cor(Plate15_Round1_counts_cleaned,Plate15_Round1_counts_cleaned, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+Calculate the RPK and FC over mock-IPs for both plates 
+
+```{r}
+Plate14_Round1_RPK <- Plate14_Round1_counts_cleaned 
+Plate14_Round1_RPK <- sweep(Plate14_Round1_RPK, 2, colSums(Plate14_Round1_RPK), FUN = "/") * 1e5
+
+cor_matrix <- cor(Plate14_Round1_RPK,Plate14_Round1_RPK, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+
+cols_with_word <- grep("PBS", names(Plate14_Round1_RPK), value = TRUE)
+Plate14_PBS <- Plate14_Round1_RPK[, cols_with_word]
+Plate14_PBS$median <- apply(Plate14_PBS, 1, median)
+Plate14_Round1_FC_byPBSmedian <- (Plate14_Round1_RPK+1) / (Plate14_PBS$median+1)
+
+cor_matrix <- cor(cbind(Plate14_Round1_FC_byPBSmedian),cbind(Plate14_Round1_FC_byPBSmedian), method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+
+Plate15_Round1_RPK <- Plate15_Round1_counts_cleaned
+Plate15_Round1_RPK <- sweep(Plate15_Round1_RPK, 2, colSums(Plate15_Round1_RPK), FUN = "/") * 1e5
+
+cor_matrix <- cor(Plate15_Round1_RPK,Plate15_Round1_RPK, method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+
+cols_with_word <- grep("PBS", names(Plate15_Round1_RPK), value = TRUE)
+Plate15_PBS <- Plate15_Round1_RPK[, cols_with_word]
+Plate15_PBS$median <- apply(Plate15_PBS, 1, median)
+Plate15_Round1_FC_byPBSmedian <- (Plate15_Round1_RPK+1) / (Plate15_PBS$median+1)
+
+cor_matrix <- cor(cbind(Plate15_Round1_FC_byPBSmedian),cbind(Plate15_Round1_FC_byPBSmedian), method = "pearson")
+corrplot(cor_matrix, method="shade", tl.cex = 0.4, tl.col = "black", col=COL2('RdBu'))
+```
+
+To get the average FC across all replicates from the same sample 
+
+```{r}
+Plates14and15_FC <- cbind(Plate14_Round1_FC_byPBSmedian,Plate15_Round1_FC_byPBSmedian)
+cols_to_remove <- grepl("PBS", names(Plates14and15_FC))
+Plates14and15_FC <- Plates14and15_FC[, !cols_to_remove]
+
+temp <- Plates14and15_FC
+
+# Extract the first seven characters of column names to identify groups
+col_prefix <- substr(colnames(temp), 1, 7)
+
+# Get unique prefixes
+unique_prefixes <- unique(col_prefix)
+
+# Initialize an empty list to store the results
+row_means_list <- list()
+
+# Loop over each unique prefix
+for (prefix in unique_prefixes) {
+  # Find columns that match the current prefix
+  matching_columns <- colnames(temp)[col_prefix == prefix]
+  
+  # Calculate the row-wise mean for these columns
+  row_means <- rowMeans(temp[, matching_columns], na.rm = TRUE)
+  
+  # Store these means in the list
+  row_means_list[[prefix]] <- row_means
+}
+
+# Combine the results into a dataframe
+Plates14and15_FC_averaged <- as.data.frame(row_means_list)
+```
+
+```{r}
+setwd('appropriate path')
+VectorScan <- read_xlsx("VectorScan_Library_1_2.xlsx")
+VectorScan_cleaned <- read_xlsx("VectorScan_cleaned.xlsx")
+```
+
+```{r}
+# Find the peptides with increased signal for each person. EXCLUDE peptides with long GS-linkers.
+
+identifiers <- unique(c('75','75','76','76','77','77','80','80','81','81','82','82','83','83','84','84','86','86','89','89','92','92','60','60','61','61','62','62','63','63','66','66','68','68','69','69','71','71','73','73','88','88','90','90','94','94'))
+
+enriched_values <- c()
+
+# Placeholder for results
+Plates14and15_VectorScan_All_results_list <- list()
+Plates14and15_VectorScan_AllSeroreactive_results_list <- list()
+Plates14and15_VectorScan_Day0Seroreactive_results_list <- list()
+Plates14and15_VectorScan_Day44Seroreactive_results_list <- list()
+Plates14and15_VectorScan_EnrichedOnly_results_list  <- list()
+Plates14and15_VectorScan_SeroNegtoSeroReactive_results_list  <- list()
+Plates14and15_VectorScan_Random_results_list <- list()
+
+Plates14and15_VectorScan_Mosquito_EnrichedOnly_results_list  <- list()
+Plates14and15_VectorScan_NewAt44_results_list <- list()
+Plates14and15_VectorScan_UpAt44_results_list <- list()
+Plates14and15_VectorScan_Mosquito_UpAt44_results_list <- list()
+Plates14and15_VectorScan_Mosquito_NewAt44_results_list <- list()
+Plates14and15_VectorScan_Tick_NewAt44_results_list <- list()
+Plates14and15_VectorScan_Plasmodium_NewAt44_results_list <- list()
+Plates14and15_VectorScan_Bacteria_NewAt44_results_list <- list()
+Plates14and15_VectorScan_Virus_NewAt44_results_list <- list()
+Plates14and15_VectorScan_BoostedOnly_results_list <- list()
+Plates14and15_VectorScan_Mosquito_BoostedOnly_results_list <- list()
+
+Plates14and15_VectorScan_AllSeroreactive_ByGroup <- data.frame(table(VectorScan_cleaned$Group))
+
+# Loop over each identifier
+for (identifier in identifiers) {
+  # Subset columns containing the specific identifier substring
+  selected_columns <- grep(identifier, names(Plates14and15_FC), value = TRUE)
+  Pt <- Plates14and15_FC[, selected_columns]
+  Pt$id <- VectorScan$id
+  
+  Pt$Day0 <- (Pt[,1] + Pt[,2])/2
+  Pt$Day44 <- (Pt[,3] + Pt[,4])/2
+  
+  Pt$Diff <- Pt$Day44 - Pt$Day0
+  
+  # Only analyze signal from peptides from the cleaned library
+  Pt <- inner_join(Pt, VectorScan_cleaned, by = 'id')
+  
+  # Find all seroreactive peptides
+  temp <- Pt[as.logical(Pt$Species == 'random'),]
+  Plates14and15_VectorScan_Random_results_list[[identifier]] <- temp
+  
+  # To be seroreactive, the average of the replicates needs to have a FC that is 4x greater than 80% of the random peptides 
+  Day0_Enriched <- quantile(temp$Day0, 0.8)*2
+  Day44_Enriched <- quantile(temp$Day44, 0.8)*2
+  
+  enriched_values <- c(enriched_values, Day0_Enriched, Day44_Enriched)
+
+  Pt$Day0_Seroreactive <- ifelse((Pt[,1] > Day0_Enriched & Pt[,2] > Day0_Enriched), 1, 0)
+  Pt$Day44_Seroreactive <- ifelse((Pt[,3] > Day44_Enriched & Pt[,4] > Day44_Enriched), 1, 0)
+  
+  Plates14and15_VectorScan_All_results_list[[identifier]] <- Pt
+
+  ### Need to be either seronegative or seroreactive (ensuring that signal is only being analyzed from peptides where the replicates are consistent)
+  
+  # Both replicates had to be seronegative or seroreactive at Day 0
+  Pt <- Pt[as.logical((Pt[,1] < Day0_Enriched & Pt[,2] < Day0_Enriched) | (Pt[,1] > Day0_Enriched & Pt[,2] > Day0_Enriched)),]
+  
+  # Both replicates had to be seronegative or seroreactive at Day 44
+  Pt <- Pt[as.logical((Pt[,3] < Day44_Enriched & Pt[,4] < Day44_Enriched) | (Pt[,3] > Day44_Enriched & Pt[,4] > Day44_Enriched)),]
+  
+  Plates14and15_VectorScan_AllSeroreactive_results_list[[identifier]] <- Pt
+  
+  # Find peptides that have an increase in signal between Day 0 and Day 44
+  
+  Pt <- Pt[as.logical(Pt$Diff>1),]
+  
+  # Only consider peptides that are seroreactive at Day 44
+  
+  Pt <- Pt[as.logical((Pt[,3] > Day44_Enriched & Pt[,4] > Day44_Enriched)),]
+  
+  Plates14and15_VectorScan_UpAt44_results_list[[identifier]] <- Pt
+  
+  mosquito_holder <- Pt[as.logical(Pt$Group == "Mosquito"),]
+  
+  Plates14and15_VectorScan_Mosquito_UpAt44_results_list[[identifier]] <- mosquito_holder
+  
+  # Find peptides that seroconverted (were seronegative at Day 0)
+  
+   Pt <- Pt[as.logical((Pt[,1] < Day0_Enriched & Pt[,2] < Day0_Enriched)),]
+    
+  Plates14and15_VectorScan_NewAt44_results_list[[identifier]] <- Pt
+  
+    mosquito_holder <- Pt[as.logical(Pt$Group == "Mosquito"),]
+  
+  Plates14and15_VectorScan_Mosquito_NewAt44_results_list[[identifier]] <- mosquito_holder
+}
+```
+
+```{r}
+# Combine data from all dataframes in the list into one dataframe
+combined_data <- do.call(rbind, lapply(names(Plates14and15_VectorScan_Random_results_list), function(i) {
+  df <- Plates14and15_VectorScan_Random_results_list[[i]]
+  df$id <- paste("Subject ", i, sep = "")
+  df <- df[, c("Day0", "Day44", "id")]
+  return(df)
+}))
+
+# Melt the data to long format for ggplot2
+melted_data <- melt(combined_data, id.vars = "id", variable.name = "Day", value.name = "Value")
+
+quantiles <- melted_data %>%
+  group_by(id, Day) %>%
+  summarize(quintile_0_8 = quantile(Value, 0.8, na.rm = TRUE)) %>%
+  mutate(quintile_0_8_times_2 = quintile_0_8 * 2)  # Calculate the point 2x the quantile
+
+quantiles$interaction_label <- with(quantiles, interaction(id, Day))
+
+ggplot(melted_data, aes(x = interaction(id, Day), y = Value)) +
+  geom_boxplot(outlier.shape = NA) +  #
+  geom_jitter(width = 0.2, alpha = 0.5) +  
+  scale_y_log10() +
+  geom_point(data = quantiles, aes(x = interaction_label, y = quintile_0_8), 
+             color = "red", size = 2, shape = 16) +
+  geom_point(data = quantiles, aes(x = interaction_label, y = quintile_0_8_times_2), 
+             color = "blue", size = 2, shape = 16) +  
+  labs(x = "Sample", y = "Fold change over Mock IPs (log10)", title = "Boxplot with Quantile Points for Each Sample") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), legend.position = "none")
+```
+
+```{r}
+Plates14and15_VectorScan_AllSeroreactive_Binary <- do.call(cbind, lapply(Plates14and15_VectorScan_All_results_list, function(df) {
+  df[, c("Day0_Seroreactive", "Day44_Seroreactive")]
+}))
+Plates14and15_VectorScan_AllSeroreactive_Binary$sum <- rowSums(Plates14and15_VectorScan_AllSeroreactive_Binary)
+
+Plates14and15_VectorScan_AllSeroreactive_Binary$id <- VectorScan_cleaned$id
+
+Plates14and15_VectorScan_AllSeroreactive_Binary <- inner_join(Plates14and15_VectorScan_AllSeroreactive_Binary, VectorScan_cleaned, by = 'id')
+
+#View(table(Plates14and15_VectorScan_AllSeroreactive_Binary$sum))
+
+day0_columns <- grep("Day0", names(Plates14and15_VectorScan_AllSeroreactive_Binary), value = TRUE)
+
+Plates14and15_VectorScan_AllSeroreactive_Binary$Day0_Sums <- rowSums(Plates14and15_VectorScan_AllSeroreactive_Binary[, day0_columns] == 1)
+Plates14and15_VectorScan_AllSeroreactive_Binary$Day0_Percent <-  Plates14and15_VectorScan_AllSeroreactive_Binary$Day0_Sums/23*100
+
+day44_columns <- grep("Day44", names(Plates14and15_VectorScan_AllSeroreactive_Binary), value = TRUE)
+
+Plates14and15_VectorScan_AllSeroreactive_Binary$Day44_Sums <- rowSums(Plates14and15_VectorScan_AllSeroreactive_Binary[, day44_columns] == 1)
+Plates14and15_VectorScan_AllSeroreactive_Binary$Day44_Percent <-  Plates14and15_VectorScan_AllSeroreactive_Binary$Day44_Sums/23*100
+
+Plates14and15_VectorScan_AllSeroreactive_Binary_Mosquito <- Plates14and15_VectorScan_AllSeroreactive_Binary[as.logical(Plates14and15_VectorScan_AllSeroreactive_Binary$Group == "Mosquito"),]
+#View(data.frame(colSums(Plates14and15_VectorScan_AllSeroreactive_Binary_Mosquito[,1:46])))
+
+Plates14and15_VectorScan_AllSeroreactive_Binary_Controls <- Plates14and15_VectorScan_AllSeroreactive_Binary[as.logical(Plates14and15_VectorScan_AllSeroreactive_Binary$Group == "Control"),]
+#View(data.frame(colSums(Plates14and15_VectorScan_AllSeroreactive_Binary_Controls[,1:46])))
+
+Plates14and15_VectorScan_AllSeroreactive_Binary_Random <- Plates14and15_VectorScan_AllSeroreactive_Binary[as.logical(Plates14and15_VectorScan_AllSeroreactive_Binary$Species == "random"),]
+#View(data.frame(colSums(Plates14and15_VectorScan_AllSeroreactive_Binary_Random[,1:46])))
+```
+
+```{r}
+# To create the graphs in the Supplementary
+identifiers <- unique(c('75','75','76','76','77','77','80','80','81','81','82','82','83','83','84','84','86','86','89','89','92','92','60','60','61','61','62','62','63','63','66','66','68','68','69','69','71','71','73','73','88','88','90','90','94','94'))
+
+results_list <- list()
+
+for (id in identifiers) {
+  if (id == "VectorScan") {
+    df <- VectorScan_cleaned
+  } else {
+    df <- Plates14and15_VectorScan_UpAt44_results_list[[id]]
+  }
+  
+  percentage_table <- table(df$Group) / sum(table(df$Group)) * 100
+  percentage_df <- as.data.frame(percentage_table)
+  colnames(percentage_df) <- c("Group", "Percentage")
+  percentage_df$Identifier <- id
+  results_list[[id]] <- percentage_df
+}
+
+combined_results <- bind_rows(results_list)
+print(combined_results)
+```
+
+```{r}
+# Get contingency tables to do Fisher's exact tests 
+# Comment out the lines as appropriate to look at whatever group/level you're interested in
+
+identifiers <- unique(c('75','75','76','76','77','77','80','80','81','81','82','82','83','83','84','84','86','86','89','89','92','92','60','60','61','61','62','62','63','63','66','66','68','68','69','69','71','71','73','73','88','88','90','90','94','94'))
+
+contingencies <- data.frame()
+
+for(patient in identifiers){
+  
+  group_to_test <- "Mosquito"
+ # group_to_test <- "Virus"
+  #group_to_test <- "Control"
+  # group_to_test <- "Plasmodium"
+  #group_to_test <- "Aedes"
+  
+  #df <- Plates14and15_VectorScan_EnrichedOnly_results_list[[patient]]
+  #df <- Plates14and15_VectorScan_UpAt44_results_list[[patient]]
+  df <- Plates14and15_VectorScan_NewAt44_results_list[[patient]]
+  #df <- Plates14and15_VectorScan_BoostedOnly_results_list[[patient]]
+  df3 <- df[as.logical(df$'Group' == group_to_test),]
+  #df3 <- df[as.logical(df$'Family' == group_to_test),]
+  
+  temp1 <- nrow(df3)
+  temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Group' == group_to_test),]) - nrow(df3)
+  #temp2 <- nrow(VectorScan[as.logical(VectorScan$'Group' == group_to_test),]) - nrow(df3)
+ # temp2 <- nrow(VectorScan_cleaned[as.logical(VectorScan_cleaned$'Family' == group_to_test),]) - nrow(df3)
+  temp3 <- nrow(df) - nrow(df3)
+  temp4 <- nrow(VectorScan_cleaned) - temp1 - temp2 - temp3
+  #temp4 <- nrow(VectorScan) - temp1 - temp2 - temp3
+    
+  paste0("Num ", group_to_test, " Hits ", temp1)
+  paste0("Num ", group_to_test, " Not hits ", temp2)
+  paste0("Num Non-", group_to_test, " Hits ", temp3 )
+  paste0("Num Non-", group_to_test, " Not hits ", temp4)
+  
+  # Create a contingency table
+  contingency_table <- matrix(c(temp1, temp2,
+                               temp3, temp4),
+                              nrow = 2,
+                              byrow = TRUE)
+  
+  colnames(contingency_table) <- c("Hit", "Not hit")
+  rownames(contingency_table) <- c(group_to_test, paste0("Not ", group_to_test))
+  
+  contingencies <- rbind(contingencies, contingency_table)
+    fisher_test <- fisher.test(contingency_table)
+    
+  print(patient)
+  print(contingency_table)
+  print(fisher_test)
+}
+
+```
+
+```{r}
+df_list <- lapply(names(Plates14and15_VectorScan_Mosquito_UpAt44_results_list), function(subject) {
+  
+  temp <- Plates14and15_VectorScan_Mosquito_UpAt44_results_list[[subject]]
+
+  temp <- temp %>%
+    filter(!is.na(Day0_Seroreactive), !is.na(Diff))
+  
+  if (length(unique(temp$Day0_Seroreactive)) < 2) {
+    return(NULL)
+  }
+  
+  # Label the group as Boosted (1) or Seroconverted (0)
+  temp$Group <- ifelse(temp$Day0_Seroreactive == 1, "Boosted", "Seroconverted")
+  temp$Subject <- subject
+  
+  return(temp[, c("Diff", "Group", "Subject")])
+})
+
+final_df <- do.call(rbind, df_list)
+final_df$GroupedSubject <- paste0(final_df$Subject, "_", final_df$Group)
+
+ggplot(final_df, aes(x = GroupedSubject, y = Diff, fill = Group)) +
+  geom_violin(trim = TRUE) +
+  geom_jitter(width = 0.2, alpha = 0.2, size = 0.5) +
+  scale_y_log10() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Violin plot of Diff by Group and Subject",
+       x = "Subject & Group",
+       y = "Delta FC (log 10 scale)",
+       fill = "Group")
+```
+
+```{r}
+wilcox_results <- final_df %>%
+  group_by(Subject) %>%
+  filter(length(unique(Group)) == 2) %>%
+  group_modify(~ {
+    test_result <- wilcox.test(Diff ~ Group, data = .x)
+    tibble(
+      p.value = test_result$p.value,
+      W = test_result$statistic
+    )
+  }) %>%
+  ungroup() %>%
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) 
+
+print(wilcox_results)
+```
+
+```{r}
+temp <- do.call(
+  bind_rows,
+  lapply(names(Plates14and15_VectorScan_Mosquito_UpAt44_results_list), function(name) {
+    Plates14and15_VectorScan_Mosquito_UpAt44_results_list[[name]] %>%
+      select(`id`)
+  })
+)
+temp <- data.frame(table(temp$id))
+View(table(temp[,2]))
+```
+
+Find the number of peptides that seroconvert in X number of people 
+```{r}
+temp2 <- do.call(
+  bind_rows,
+  lapply(names(Plates14and15_VectorScan_Mosquito_NewAt44_results_list), function(name) {
+    Plates14and15_VectorScan_Mosquito_NewAt44_results_list[[name]] %>%
+      select(`id`)
+  })
+)
+temp2 <- data.frame(table(temp2$id))
+View(table(temp2[,2]))
+```
+
+Find the number of peptides that have increased signal (boosted + seroconverted) in X number of people 
+```{r}
+temp <- do.call(
+  bind_rows,
+  lapply(names(Plates14and15_VectorScan_Mosquito_UpAt44_results_list), function(name) {
+    Plates14and15_VectorScan_Mosquito_UpAt44_results_list[[name]] %>%
+      select(`id`)
+  })
+)
+
+id_counts <- data.frame(table(temp[,1]))
+# will give a table with the number of peptides that have increased signal (boosted + seroconverted) in X number of people 
+
+# Then make a new dataframe that only includes the peptides with increased signal in at least 2 people 
+temp <- data.frame(id = as.numeric(as.character(id_counts[as.logical(id_counts$Freq >= 2),][,1])))
+
+Plates14and15_VectorScan_UpAt44_In2PlusPeople <- inner_join(temp, Plates14and15_VectorScan_AllSeroreactive_Binary, by = 'id' )
+```
+
+Find motifs that are enriched within this set of peptides 
+```{r}
+setwd('path to wherever the relevant files live')
+
+seqs <- AAStringSet(Plates14and15_VectorScan_UpAt44_In2PlusPeople$'AA Sequence')
+  # Add names from the sequence header column
+names(seqs) <- paste0(Plates14and15_VectorScan_UpAt44_In2PlusPeople$id)
+
+writeXStringSet(seqs, filepath = "Plates14and15_VectorScan_UpAt44_In2PlusPeople.faa")
+```
+
+cd [[path to files]]
+makeblastdb -in Plates14and15_VectorScan_UpAt44_In2PlusPeople.faa -out db -dbtype prot
+blastp -query Plates14and15_VectorScan_UpAt44_In2PlusPeople.faa -db db  -evalue 1 -max_hsps 1 -max_target_seqs 100000  -word_size 7 -num_threads 10 -outfmt 6 -out Plates14and15_VectorScan_UpAt44_In2PlusPeople.txt
+awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' Plates14and15_VectorScan_UpAt44_In2PlusPeople.txt > Plates14and15_VectorScan_UpAt44_In2PlusPeople.csv
+
+```{r}
+setwd('path to files')
+UpIn2PlusPeople_BLAST <- read.csv('Plates14and15_VectorScan_UpAt44_In2PlusPeople.csv', header = FALSE)
+UpIn2PlusPeople_BLAST <- UpIn2PlusPeople_BLAST[as.logical(UpIn2PlusPeople_BLAST$V12 >= 40),]
+UpIn2PlusPeople_BLAST$id <- UpIn2PlusPeople_BLAST[,2]
+
+edge_list <- UpIn2PlusPeople_BLAST[, c("V1", "V2")]
+g <- graph_from_data_frame(d = edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE, remove.loops = TRUE)
+clusters <- cluster_louvain(g)
+
+membership_vector <- membership(clusters)
+cluster_sizes <- table(membership_vector)
+membership_df <- data.frame(id = as.numeric(names(membership_vector)), 
+                            ClusterID = as.integer(membership_vector))
+
+UpIn2PlusPeople_BLAST_membership_df <- inner_join(membership_df, VectorScan_cleaned, by = 'id')
+```
+
+
+```{r}
+# For the sake of visualization, only show clusters that have at least 5 members (what is shown in the paper figure)
+# but to find all peptides with sequence similarity to at least 1 other peptide, show clusters that have at least 2 members 
+
+#cluster_threshold <- 5
+cluster_threshold <- 2
+
+valid_clusters <- names(cluster_sizes[cluster_sizes >= cluster_threshold])
+vertices_to_keep <- which(membership_vector %in% valid_clusters)
+g_filtered <- induced_subgraph(g, vids = vertices_to_keep)
+
+filtered_membership_vector <- membership_vector[vertices_to_keep]
+
+num_filtered_clusters <- length(unique(filtered_membership_vector))
+palette_size <- max(12, num_filtered_clusters) 
+colors <- colorRampPalette(brewer.pal(12, "Set3"))(palette_size)
+cluster_colors <- colors[as.numeric(factor(filtered_membership_vector))]
+
+vertex_labels <- sapply(filtered_membership_vector, function(cluster_id) {
+  if (cluster_sizes[cluster_id] >= cluster_threshold) {
+    return(as.character(cluster_id))
+  } else {
+    return(NA)  
+  }
+})
+  
+g_simplified <- simplify(g_filtered,  remove.loops = TRUE)
+
+morethan1_membership_df <- membership_df %>%
+  group_by(ClusterID) %>%             
+  filter(n() >= cluster_threshold) %>%                 
+  ungroup()      
+
+morethan1_membership_df <- inner_join(morethan1_membership_df, VectorScan_cleaned, by = 'id')
+morethan1_membership_df$ForAlignment <- paste0(">",morethan1_membership_df$id," ", morethan1_membership_df$'AA Sequence')
+
+UpIn2PlusPeople_morethan1_membership_df <- morethan1_membership_df[order(morethan1_membership_df$ClusterID, decreasing = FALSE), ]
+
+consistent_layout <- layout_with_fr(g_simplified)
+
+plot(g_simplified,
+     vertex.color = cluster_colors,
+      vertex.size = 3,
+     vertex.label = vertex_labels,
+      vertex.label.cex = 0.6,
+     edge.arrow.size = 0.5,
+     main = "Peptides that emerge in 2+ people at Day 44",
+     layout = consistent_layout)
+  
+#pdf("PeptideSignature_Network.pdf", width = 10, height = 8)
+
+plot(g_simplified,
+       vertex.color = cluster_colors,
+       vertex.size = 4,
+       vertex.label = NA,
+       edge.arrow.size = 0.5,
+       main = "Peptides that emerge in 2+ people at Day 44",
+       layout = consistent_layout)
+  
+dev.off()
+
+plot(g_simplified,
+     vertex.color = cluster_colors,
+     vertex.size = 4,
+     vertex.label = NA,
+     edge.arrow.size = 0.5,
+     main = "Peptides that emerge in 2+ people at Day 44",
+     layout = consistent_layout)
+
+```
+```{r}
+hits <- data.frame(id = Plates14and15_VectorScan_UpAt44_In2PlusPeople$id)
+hits <- inner_join(hits, VectorScan_updated_Mosquito_InterPro_expanded, by = 'id')
+
+hits_table <- data.frame(table(hits$'Interpro ID_from_Protein'))
+
+VectorScan_Interpro_table <-  data.frame(table(VectorScan_updated_Mosquito_InterPro_expanded$'Interpro ID_from_Protein'))
+
+hits_table <- inner_join(hits_table, VectorScan_Interpro_table, by = 'Var1')
+colnames(hits_table) <- c("Annotation", "Annotation Hit", "VectorScan")
+hits_table$'Annotation Not hit' <- hits_table$VectorScan - hits_table$'Annotation Hit'
+hits_table$'Not Annotation Hit' <- sum(hits_table[,2])-hits_table$`Annotation Hit`
+hits_table$'Not Annotation Not Hit' <- sum(VectorScan_Interpro_table[,2]) - hits_table$'Annotation Hit' - hits_table$'Annotation Not hit' - hits_table$'Not Annotation Hit'
+
+temp <- hits_table 
+temp_table_ordered <- temp %>%
+  arrange(desc(`Annotation Hit`))
+
+temp_table_ordered$'Interpro Description' <- VectorScan_updated_Mosquito_InterPro_expanded$'Interpro Description_from_Protein'[match(temp_table_ordered$'Annotation', VectorScan_updated_Mosquito_InterPro_expanded$'Interpro ID_from_Protein')]
+
+filtered_temp <- temp_table_ordered %>%
+  filter(`Annotation` != "N/A")
+
+top_temp <- head(filtered_temp, 10)
+
+my_plot <- ggplot(top_temp, aes(x = reorder(Annotation, `Annotation Hit`), y = `Annotation Hit`)) +
+  geom_bar(stat = "identity", fill = "#872110") +
+  coord_flip() +  
+  labs(
+    title = "10 Largest Groups",
+    x = "Annotation",
+    y = "Annotation Hit"
+  ) +
+  #ylim(0, 125) + 
+  geom_text(aes(label = `Interpro Description`), hjust = -0.1, size = 6, color = "black") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 16, hjust = 1))  # Align text to the left
+
+print(my_plot)
+
+# Uncomment the line below to save as an .svg, which makes it editable to improve visualization
+#ggsave(filename = "Interpro_Largest.svg", plot = my_plot, width = 10, height = 8, units = "in", device = "svg")
+
+```
+
+
+```{r}
+# To do the overrepresentation analysis
+hits_table$p_value <- NA
+
+for (i in 1:nrow(hits_table)) {
+  annotation_hit <- hits_table[i, "Annotation Hit"]
+  annotation_not_hit <- hits_table[i, "Annotation Not hit"]
+  not_annotation_hit <- hits_table[i, "Not Annotation Hit"]
+  not_annotation_not_hit <- hits_table[i, "Not Annotation Not Hit"]
+  
+  # Construct the contingency table
+  contingency_table <- matrix(c(annotation_hit, annotation_not_hit,
+                                not_annotation_hit, not_annotation_not_hit),
+                              nrow = 2,
+                              byrow = TRUE)
+  test_result <- fisher.test(contingency_table)
+  
+  hits_table$p_value[i] <- test_result$p.value
+  hits_table$odds_ratio[i] <- as.numeric(test_result$estimate[1])
+}
+
+hits_table$'Interpro Description' <- VectorScan_updated_Mosquito_InterPro_expanded$'Interpro Description_from_Protein'[match(hits_table$'Annotation', VectorScan_updated_Mosquito_InterPro_expanded$'Interpro ID_from_Protein')]
+
+
+significant_hits_table <- hits_table[as.logical(hits_table$p_value < 0.05),]
+significant_hits_table <- significant_hits_table[as.logical(significant_hits_table$odds_ratio > 1),]
+
+significant_hits_table$'-log10(p)' <- -log10(significant_hits_table$p_value)
+  
+significant_hits_table_ordered <- significant_hits_table %>%
+ arrange(desc(`Annotation Hit`))
+
+filtered_temp <- significant_hits_table_ordered %>%
+  filter(`Annotation` != "N/A")
+
+top_significant_hits <- head(filtered_temp, 10)
+
+my_plot <- ggplot(top_significant_hits, aes(x = reorder(Annotation, `Annotation Hit`), y = `Annotation Hit`, fill = `-log10(p)`)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +  
+  labs(
+    title = "10 Largest Groups w/ significant p-values",
+    x = "Annotation",
+    y = "Annotation Hit"
+  ) +
+  #ylim(0, 75) + 
+  geom_text(aes(label = `Interpro Description`), hjust = -0.1, size = 6, color = "black") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 16, hjust = 1)) 
+
+print(my_plot)
+
+# Uncomment the line below to save as an .svg, which makes it editable to improve visualization
+ggsave(filename = "Interpro_Overrep.svg", plot = my_plot, width = 10, height = 8, units = "in", device = "svg")
+```
