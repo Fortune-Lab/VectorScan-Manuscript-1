@@ -35,6 +35,8 @@ names(seqs) <- paste0(Bowtie_38bp_fasta$id)
 writeXStringSet(seqs, filepath ="VectorScan_Bowtie_38bp.fasta")
 ```
 
+The following code to do the alignment was based off of https://bio-protocol.org/en/bpdetail?id=4464&type=0 
+
 In terminal again: 
 
 Make the bowtie2 index: 
