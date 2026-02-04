@@ -410,7 +410,7 @@ blastp -query VectorScan_Dengue.faa -db db -outfmt 6 -max_hsps 1 -out VectorScan
 awk 'BEGIN{FS="\t"; OFS=","} {print $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12}' VectorScan_Dengue4.txt > VectorScan_Dengue4.csv
 
 ```{r}
-DENV1_peptides <- read.csv('/Users/melodi/Library/CloudStorage/OneDrive-SharedLibraries-HarvardUniversity/The Antibody Observatory (ABO) - Documents/Manuscript_1/VectorScan_Dengue1.csv', header=FALSE)
+DENV1_peptides <- read.csv('filepath/VectorScan_Dengue1.csv', header=FALSE)
 #DENV1_peptides <- DENV1_peptides[as.logical((DENV1_peptides$V8 - DENV1_peptides$V7) > 28),]
 #DENV1_peptides <- DENV1_peptides[as.logical(DENV1_peptides$V11 < 1),]
 DENV1_peptides$id <- DENV1_peptides[,1]
@@ -420,7 +420,7 @@ DENV1_peptides$AA <- VectorScan$'AA Sequence'[match(DENV1_peptides$id, VectorSca
 DENV1_peptides$ForAlignment <- paste0(">", DENV1_peptides$V2, " ",DENV1_peptides$AA)
 DENV1_peptides$AANumber <- DENV1_peptides$V9  + (DENV1_peptides$V8 - DENV1_peptides$V7)/2
 
-DENV2_peptides <- read.csv('/Users/melodi/Library/CloudStorage/OneDrive-SharedLibraries-HarvardUniversity/The Antibody Observatory (ABO) - Documents/Manuscript_1/VectorScan_Dengue2.csv', header=FALSE)
+DENV2_peptides <- read.csv('filepath/VectorScan_Dengue2.csv', header=FALSE)
 #DENV2_peptides <- DENV2_peptides[as.logical((DENV2_peptides$V8 - DENV2_peptides$V7) > 28),]
 #DENV2_peptides <- DENV2_peptides[as.logical(DENV2_peptides$V11 < 1),]
 DENV2_peptides$id <- DENV2_peptides[,1]
@@ -430,7 +430,7 @@ DENV2_peptides$AA <- VectorScan$'AA Sequence'[match(DENV2_peptides$id, VectorSca
 DENV2_peptides$ForAlignment <- paste0(">", DENV2_peptides$V2, " ",DENV2_peptides$AA)
 DENV2_peptides$AANumber <- DENV2_peptides$V9  + (DENV2_peptides$V8 - DENV2_peptides$V7)/2
 
-DENV4_peptides <- read.csv('/Users/melodi/Library/CloudStorage/OneDrive-SharedLibraries-HarvardUniversity/The Antibody Observatory (ABO) - Documents/Manuscript_1/VectorScan_Dengue4.csv', header=FALSE)
+DENV4_peptides <- read.csv('filepath/VectorScan_Dengue4.csv', header=FALSE)
 #DENV4_peptides <- DENV4_peptides[as.logical((DENV4_peptides$V8 - DENV4_peptides$V7) > 28),]
 #DENV4_peptides <- DENV4_peptides[as.logical(DENV4_peptides$V11 < 1),]
 DENV4_peptides$id <- DENV4_peptides[,1]
