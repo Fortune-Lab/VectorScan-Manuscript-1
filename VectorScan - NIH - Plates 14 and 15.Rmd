@@ -45,6 +45,8 @@ names(seqs) <- paste0(Bowtie_84bp_fasta$id)
 writeXStringSet(seqs, filepath ="VectorScan_Bowtie_84bp.fasta")
 ```
 
+The following code to do the alignment was based off of https://bio-protocol.org/en/bpdetail?id=4464&type=0 
+
 3. Make the bowtie2 index: 
 bowtie2-build -f VectorScan_Bowtie_84bp.fasta VectorScan_84bp
 
@@ -61,6 +63,7 @@ for i in *.sorted.bam; do samtools idxstats $i | cut -f 1,3 | gsed -e'/^\*\t/d' 
 paste -d ',' *.count.csv >2024_11_05_VectorScan_Plate14_Round1_counts.csv
 
 7. Clean up the counts based on replicates being consistent enough / high enough sequencing depth
+
 ```{r}
 # Read in the counts file. This is the file after de-multiplexing the fastq's. Each column is a replicate, each row is a peptide in the library.
 Plate14_Round1_counts <- read.csv("2024_11_05_VectorScan_Plate14_Round1_counts.csv")
