@@ -1,21 +1,24 @@
 # VectorScan Pilot
-Code associated with the manuscript "Comprehensive evaluation of antibody responses to mosquito-borne arboviruses and their vectors using highly multiplexed serology" by Anahtar et al. (2025)
+Code associated with the manuscript "Integrated evaluation of antibody responses to mosquitoes and mosquito-borne arboviruses using highly multiplexed serology" by Anahtar et al. (2026)
 
 # Project Description
 All code relevant to producing the figures/conducting the analyses in the manuscript are available here.
 Please don't hesitate to contact us if there are any issues.
 
-### "VectorScanLibrary characterization.Rmd"
-R notebook containing code to analyze the input library
+### "2026_04_24_Plates22and27_Analysis - Github - Keep 22.Rmd"
+R notebook containing code to analyze the CDC human samples. "Keep 22" refers to the fact that for samples that were run on both both plates, the normalized counts from Plate 22 were used for downstream analysis
 
-### "VectorScan - CDC - Plate 22.Rmd"
-R notebook containing code to analyze the CDC human samples
-
-### "VectorScan - NHP - Plate 13.Rmd"
+### "2026_02_02_Plate13_Analysis-Github.Rmd"
 R notebook containing code to analyze the DENV-exposed non-human primate (NHP) samples
 
-### "VectorScan - NIH - Plates 14 and 15.Rmd"
+### "2026_02_02_Plate23_Analysis-Github.Rmd"
 R notebook containing code to analyze the NIH controlled exposure human samples
 
-### "VectorScan - Protein Annotation.Rmd"
-R notebook containing code to annotate the mosquito-derived proteins in the library with InterPro IDs and other annotations
+### "2026_02_06_Plate28_Analysis-Github.Rmd"
+R notebook containing code to analyze the Malian human samples
+
+### "22026_02_11_Cross cohort_Analysis - Github - Keep 22.Rmd"
+R notebook containing code to analyze the human samples across study cohorts
+
+
+
