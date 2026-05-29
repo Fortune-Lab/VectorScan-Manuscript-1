@@ -1,5 +1,5 @@
 # VectorScan Pilot
-Code associated with the manuscript "Integrated evaluation of antibody responses to mosquitoes and mosquito-borne arboviruses using highly multiplexed serology" by Anahtar et al. (2026)
+Code associated with the manuscript "Integrated evaluation of antibody responses to mosquitoes and mosquito-borne pathogens using highly multiplexed serology" by Anahtar et al. (2026)
 
 # Project Description
 All code relevant to producing the figures/conducting the analyses in the manuscript are available here.
