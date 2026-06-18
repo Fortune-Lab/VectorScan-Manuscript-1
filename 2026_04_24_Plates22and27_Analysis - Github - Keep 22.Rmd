@@ -1181,7 +1181,7 @@ counts_of_interest <- data.frame(
 idx <- match(counts_of_interest$column, Plates22and27_metadata$Subject)
 counts_of_interest$CHIKV_IgM <- Plates22and27_metadata$CHIKV_IgM[idx]
 
-# To get the mosquito breadth
+# To get the mosquito depth
 depth <- data.frame(
   column = temp_names,
   n_counts  = colSums(temp[,1:62], na.rm = TRUE))
